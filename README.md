@@ -4,6 +4,8 @@ A Windows desktop market browser and passive community contributor for **Spirit 
 
 ValeMarket shows currently active listings reported by contributors. It is not a sale-history tracker, does not automate the game, and does not modify game files.
 
+![ValeMarket Desktop browsing live Spirit Vale listings](docs/market.webp)
+
 - Browse the live market at [market.spiritvalers.com](https://market.spiritvalers.com/)
 - Download the latest Windows build from [Releases](https://github.com/bjb2/valemarket-desktop/releases/latest)
 - Report bugs through [GitHub Issues](https://github.com/bjb2/valemarket-desktop/issues)
