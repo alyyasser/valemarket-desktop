@@ -1,0 +1,400 @@
+import { CURRENT_GAME_BUILD_FINGERPRINT, type CapturedFishNetPacket } from "@kar-mi/spirit-vale-tools-capture";
+import { FishNetMarketTracker } from "@kar-mi/spirit-vale-tools-market";
+import {
+  MARKET_API_URL,
+  MARKET_PACKAGE_VERSION,
+  MARKET_PROTOCOL_VERSION,
+  type MarketObservationBatch,
+  type MarketUploadObservation,
+} from "./market-contracts.ts";
+import { normalizeMarketEvent } from "./normalizer.ts";
+import { errorMessage, isRecord, loadJson, writeJsonAtomic } from "./storage.ts";
+
+const FLUSH_OBSERVATIONS = 50;
+const MAX_BATCH_OBSERVATIONS = 100;
+const FLUSH_INTERVAL_MS = 7_500;
+const MAX_REQUEST_BYTES = 240 * 1024;
+const MAX_RECENT_KEYS = 20_000;
+const MAX_RETRY_MS = 5 * 60 * 1_000;
+const TOKEN = /^[A-Za-z0-9_-]{43}$/;
+const HASH = /^[0-9a-f]{64}$/;
+const encoder = new TextEncoder();
+
+interface StoredBatch {
+  batch: MarketObservationBatch;
+  attempts: number;
+  nextAttemptAt: string;
+  lastError?: string;
+}
+
+interface ContributorState {
+  schemaVersion: 1;
+  installationToken?: string;
+  outbox: StoredBatch[];
+  recentKeys: string[];
+}
+
+export interface ContributorSnapshot {
+  prepared: number;
+  uploaded: number;
+  queuedBatches: number;
+  latestObservationAt?: string;
+  latestUploadAt?: string;
+  warning?: string;
+}
+
+export interface MarketContributorOptions {
+  statePath: string;
+  collectorVersion: string;
+  endpoint?: string;
+  fetch?: typeof fetch;
+  now?: () => Date;
+  onState?: (state: ContributorSnapshot) => void;
+}
+
+export class MarketContributor {
+  private readonly tracker = new FishNetMarketTracker();
+  private readonly pending = new Map<string, MarketUploadObservation>();
+  private readonly recent = new Set<string>();
+  private readonly recentOrder: string[];
+  private readonly endpoint: string;
+  private readonly fetch: typeof fetch;
+  private readonly now: () => Date;
+  private readonly metrics: ContributorSnapshot;
+  private operations: Promise<void> = Promise.resolve();
+  private flushTimer: ReturnType<typeof setTimeout> | undefined;
+  private uploadTimer: ReturnType<typeof setTimeout> | undefined;
+  private enabled = false;
+  private stopped = false;
+
+  private constructor(
+    private readonly options: MarketContributorOptions,
+    private readonly state: ContributorState,
+  ) {
+    this.endpoint = (options.endpoint ?? MARKET_API_URL).replace(/\/$/, "");
+    this.fetch = options.fetch ?? globalThis.fetch;
+    this.now = options.now ?? (() => new Date());
+    this.recentOrder = [...state.recentKeys];
+    for (const key of this.recentOrder) this.recent.add(key);
+    this.metrics = { prepared: 0, uploaded: 0, queuedBatches: state.outbox.length };
+  }
+
+  static async load(options: MarketContributorOptions): Promise<MarketContributor> {
+    const state = await loadJson(options.statePath, emptyState, parseState);
+    return new MarketContributor(options, state);
+  }
+
+  snapshot(): ContributorSnapshot {
+    return { ...this.metrics, queuedBatches: this.state.outbox.length };
+  }
+
+  setEnabled(enabled: boolean): void {
+    if (this.stopped || this.enabled === enabled) return;
+    this.enabled = enabled;
+    if (!enabled) {
+      clearTimeout(this.flushTimer);
+      clearTimeout(this.uploadTimer);
+      this.flushTimer = undefined;
+      this.uploadTimer = undefined;
+      this.pending.clear();
+      this.publish();
+      return;
+    }
+    if (this.state.outbox.length > 0) this.scheduleUpload(0);
+  }
+
+  consume(packet: CapturedFishNetPacket): void {
+    if (!this.enabled || this.stopped) return;
+    let events;
+    try {
+      events = this.tracker.consume(packet);
+    } catch (error) {
+      this.warn(`Could not decode a verified market packet: ${errorMessage(error)}`);
+      return;
+    }
+    if (events.length === 0) return;
+    this.enqueue(async () => {
+      if (!this.enabled || this.stopped) return;
+      for (const event of events) {
+        const observations = await normalizeMarketEvent(event, this.now());
+        for (const observation of observations) this.addObservation(observation);
+      }
+      if (this.pending.size >= FLUSH_OBSERVATIONS) {
+        await this.flushPending();
+        await this.uploadOutbox();
+      } else if (this.pending.size > 0) {
+        this.scheduleFlush();
+      }
+    });
+  }
+
+  async shutdown(): Promise<void> {
+    clearTimeout(this.flushTimer);
+    clearTimeout(this.uploadTimer);
+    this.flushTimer = undefined;
+    this.uploadTimer = undefined;
+    await this.operations;
+    if (this.enabled && this.pending.size > 0) await this.flushPending();
+    this.stopped = true;
+    await this.persist();
+  }
+
+  private addObservation(observation: MarketUploadObservation): void {
+    const key = deduplicationKey(observation);
+    if (this.recent.has(key) || this.pending.has(key)) return;
+    this.pending.set(key, observation);
+    this.recent.add(key);
+    this.recentOrder.push(key);
+    while (this.recentOrder.length > MAX_RECENT_KEYS) {
+      const removed = this.recentOrder.shift();
+      if (removed !== undefined) this.recent.delete(removed);
+    }
+    this.metrics.prepared += 1;
+    this.metrics.latestObservationAt = this.now().toISOString();
+    delete this.metrics.warning;
+    this.publish();
+  }
+
+  private scheduleFlush(): void {
+    if (this.flushTimer !== undefined || this.stopped || !this.enabled) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = undefined;
+      this.enqueue(async () => {
+        if (!this.enabled || this.stopped) return;
+        await this.flushPending();
+        await this.uploadOutbox();
+      });
+    }, FLUSH_INTERVAL_MS);
+  }
+
+  private scheduleUpload(delayMs: number): void {
+    if (this.stopped || !this.enabled) return;
+    clearTimeout(this.uploadTimer);
+    this.uploadTimer = setTimeout(() => {
+      this.uploadTimer = undefined;
+      this.enqueue(async () => {
+        if (this.enabled && !this.stopped) await this.uploadOutbox();
+      });
+    }, delayMs);
+  }
+
+  private enqueue(operation: () => Promise<void>): void {
+    this.operations = this.operations.then(operation).catch((error) => this.warn(errorMessage(error)));
+  }
+
+  private async flushPending(): Promise<void> {
+    clearTimeout(this.flushTimer);
+    this.flushTimer = undefined;
+    while (this.pending.size > 0) {
+      const observations: MarketUploadObservation[] = [];
+      const selectedKeys: string[] = [];
+      for (const [key, observation] of this.pending) {
+        observations.push(observation);
+        selectedKeys.push(key);
+        const batch = this.createBatch(observations);
+        if (encoder.encode(JSON.stringify(batch)).byteLength > MAX_REQUEST_BYTES) {
+          observations.pop();
+          selectedKeys.pop();
+          if (observations.length === 0) throw new Error("One normalized market observation exceeds the upload request limit");
+          break;
+        }
+        if (observations.length >= MAX_BATCH_OBSERVATIONS) break;
+      }
+      const batch = this.createBatch(observations);
+      this.state.outbox.push({ batch, attempts: 0, nextAttemptAt: this.now().toISOString() });
+      for (const key of selectedKeys) this.pending.delete(key);
+    }
+    this.state.recentKeys = [...this.recentOrder];
+    await this.persist();
+    this.publish();
+  }
+
+  private createBatch(observations: MarketUploadObservation[]): MarketObservationBatch {
+    return {
+      protocolVersion: MARKET_PROTOCOL_VERSION,
+      batchId: crypto.randomUUID(),
+      marketId: "global",
+      sentAt: this.now().toISOString(),
+      collector: {
+        version: this.options.collectorVersion,
+        gameBuild: CURRENT_GAME_BUILD_FINGERPRINT,
+        marketPackageVersion: MARKET_PACKAGE_VERSION,
+      },
+      observations,
+    };
+  }
+
+  private async uploadOutbox(): Promise<void> {
+    while (this.enabled && !this.stopped && this.state.outbox.length > 0) {
+      const entry = this.state.outbox[0]!;
+      const delay = Date.parse(entry.nextAttemptAt) - this.now().getTime();
+      if (delay > 0) {
+        this.scheduleUpload(delay);
+        return;
+      }
+      try {
+        const token = await this.installationToken();
+        const response = await this.fetch(`${this.endpoint}/v2/observations`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify(entry.batch),
+          redirect: "error",
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (response.status === 202) {
+          this.metrics.uploaded += entry.batch.observations.length;
+          this.metrics.latestUploadAt = this.now().toISOString();
+          delete this.metrics.warning;
+          this.state.outbox.shift();
+          await this.persist();
+          this.publish();
+          continue;
+        }
+        if (response.status === 401) delete this.state.installationToken;
+        const retryAfter = retryAfterMs(response.headers.get("retry-after"), this.now());
+        await this.deferEntry(entry, `Market upload returned HTTP ${response.status}`, retryAfter);
+      } catch (error) {
+        await this.deferEntry(entry, `Market upload failed: ${errorMessage(error)}`);
+      }
+      return;
+    }
+  }
+
+  private async installationToken(): Promise<string> {
+    if (this.state.installationToken !== undefined) return this.state.installationToken;
+    const response = await this.fetch(`${this.endpoint}/v2/installations`, {
+      method: "POST",
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (response.status !== 201) throw new Error(`Contributor registration returned HTTP ${response.status}`);
+    const body: unknown = await response.json();
+    if (!isRecord(body) || typeof body.token !== "string" || !TOKEN.test(body.token)) {
+      throw new Error("Contributor registration returned an invalid token");
+    }
+    this.state.installationToken = body.token;
+    await this.persist();
+    return body.token;
+  }
+
+  private async deferEntry(entry: StoredBatch, message: string, serverDelay?: number): Promise<void> {
+    entry.attempts += 1;
+    entry.lastError = message;
+    const delay = serverDelay ?? Math.min(MAX_RETRY_MS, 1_000 * (2 ** Math.min(entry.attempts - 1, 8)));
+    entry.nextAttemptAt = new Date(this.now().getTime() + delay).toISOString();
+    await this.persist();
+    this.warn(message);
+    this.scheduleUpload(delay);
+  }
+
+  private async persist(): Promise<void> {
+    await writeJsonAtomic(this.options.statePath, this.state);
+  }
+
+  private warn(message: string): void {
+    this.metrics.warning = message;
+    this.publish();
+  }
+
+  private publish(): void {
+    this.options.onState?.(this.snapshot());
+  }
+}
+
+function emptyState(): ContributorState {
+  return { schemaVersion: 1, outbox: [], recentKeys: [] };
+}
+
+function parseState(value: unknown): ContributorState {
+  if (!isRecord(value) || value.schemaVersion !== 1) return emptyState();
+  const installationToken = typeof value.installationToken === "string" && TOKEN.test(value.installationToken)
+    ? value.installationToken
+    : undefined;
+  const outbox = Array.isArray(value.outbox)
+    ? value.outbox.map(parseStoredBatch).filter((entry): entry is StoredBatch => entry !== undefined)
+    : [];
+  const recentKeys = Array.isArray(value.recentKeys)
+    ? value.recentKeys.filter((entry): entry is string => typeof entry === "string" && deduplicationKeyPattern(entry)).slice(-MAX_RECENT_KEYS)
+    : [];
+  return {
+    schemaVersion: 1,
+    ...(installationToken === undefined ? {} : { installationToken }),
+    outbox,
+    recentKeys,
+  };
+}
+
+function parseStoredBatch(value: unknown): StoredBatch | undefined {
+  if (!isRecord(value) || !isRecord(value.batch)) return undefined;
+  const batch = value.batch;
+  const rawObservations = batch.observations;
+  if (!Array.isArray(rawObservations)
+    || batch.protocolVersion !== MARKET_PROTOCOL_VERSION
+    || typeof batch.batchId !== "string"
+    || batch.marketId !== "global"
+    || typeof batch.sentAt !== "string"
+    || !isRecord(batch.collector)
+    || typeof batch.collector.version !== "string"
+    || typeof batch.collector.gameBuild !== "string"
+    || typeof batch.collector.marketPackageVersion !== "string") return undefined;
+  const observations = rawObservations.filter(isObservation);
+  if (observations.length !== rawObservations.length || observations.length === 0) return undefined;
+  const parsedBatch: MarketObservationBatch = {
+    protocolVersion: MARKET_PROTOCOL_VERSION,
+    batchId: batch.batchId,
+    marketId: "global",
+    sentAt: batch.sentAt,
+    collector: {
+      version: batch.collector.version,
+      gameBuild: batch.collector.gameBuild,
+      marketPackageVersion: batch.collector.marketPackageVersion,
+    },
+    observations,
+  };
+  const attempts = Number.isSafeInteger(value.attempts) && Number(value.attempts) >= 0 ? Number(value.attempts) : 0;
+  const nextAttemptAt = typeof value.nextAttemptAt === "string" && Number.isFinite(Date.parse(value.nextAttemptAt))
+    ? value.nextAttemptAt
+    : new Date().toISOString();
+  return {
+    batch: parsedBatch,
+    attempts,
+    nextAttemptAt,
+    ...(typeof value.lastError === "string" ? { lastError: value.lastError } : {}),
+  };
+}
+
+function isObservation(value: unknown): value is MarketUploadObservation {
+  return isRecord(value)
+    && typeof value.reportId === "string"
+    && typeof value.listingKey === "string" && HASH.test(value.listingKey)
+    && typeof value.listingVersion === "number" && Number.isSafeInteger(value.listingVersion)
+    && typeof value.payloadHash === "string" && HASH.test(value.payloadHash)
+    && typeof value.itemType === "number" && Number.isSafeInteger(value.itemType)
+    && typeof value.itemId === "string"
+    && (typeof value.displayName === "string" || value.displayName === null)
+    && typeof value.unitPrice === "number" && Number.isSafeInteger(value.unitPrice)
+    && typeof value.quantity === "number" && Number.isSafeInteger(value.quantity)
+    && typeof value.status === "number" && Number.isSafeInteger(value.status)
+    && Array.isArray(value.stats)
+    && typeof value.observedAt === "string"
+    && (typeof value.expiresAt === "string" || value.expiresAt === null);
+}
+
+function deduplicationKey(observation: MarketUploadObservation): string {
+  return `${observation.listingKey}:${observation.listingVersion}:${observation.payloadHash}`;
+}
+
+function deduplicationKeyPattern(value: string): boolean {
+  const [listingKey, version, payloadHash, extra] = value.split(":");
+  return extra === undefined && listingKey !== undefined && HASH.test(listingKey)
+    && version !== undefined && /^\d+$/.test(version)
+    && payloadHash !== undefined && HASH.test(payloadHash);
+}
+
+function retryAfterMs(value: string | null, now: Date): number | undefined {
+  if (value === null) return undefined;
+  if (/^\d+$/.test(value)) return Math.min(MAX_RETRY_MS, Number(value) * 1_000);
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return undefined;
+  return Math.min(MAX_RETRY_MS, Math.max(0, timestamp - now.getTime()));
+}

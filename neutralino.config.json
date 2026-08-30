@@ -1,0 +1,51 @@
+{
+  "$schema": "https://raw.githubusercontent.com/neutralinojs/neutralinojs/main/schemas/neutralino.config.schema.json",
+  "applicationId": "dev.spiritvale.valemarket",
+  "version": "0.1.0",
+  "applicationName": "ValeMarket Desktop",
+  "author": "ValeMarket",
+  "description": "Standalone Spirit Vale market browser and privacy-safe contributor",
+  "defaultMode": "window",
+  "port": 0,
+  "enableServer": true,
+  "enableNativeAPI": true,
+  "enableExtensions": true,
+  "tokenSecurity": "one-time",
+  "logging": {
+    "enabled": true,
+    "writeToLogFile": true
+  },
+  "url": "/views/main/index.html",
+  "documentRoot": "/resources/",
+  "nativeAllowList": ["app.exit", "os.open", "window.*"],
+  "extensions": [
+    {
+      "id": "dev.spiritvale.valemarket.backend",
+      "commandWindows": "\"${NL_PATH}/extensions/bin/bun.exe\" --no-orphans \"${NL_PATH}/extensions/backend/index.js\""
+    }
+  ],
+  "modes": {
+    "window": {
+      "title": "ValeMarket Desktop",
+      "width": 1280,
+      "height": 760,
+      "minWidth": 980,
+      "minHeight": 620,
+      "borderless": false,
+      "resizable": true,
+      "exitProcessOnClose": true,
+      "injectGlobals": true,
+      "injectClientLibrary": false,
+      "useLogicalPixels": true
+    }
+  },
+  "cli": {
+    "binaryVersion": "6.9.0",
+    "clientVersion": "6.9.0",
+    "resourcesPath": "resources",
+    "extensionsPath": "extensions",
+    "binaryName": "valemarket-desktop",
+    "distributionPath": "dist",
+    "copyItems": [".valemarket-portable", "neutralino.config.json"]
+  }
+}
