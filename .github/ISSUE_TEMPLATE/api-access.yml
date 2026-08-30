@@ -1,0 +1,68 @@
+name: Developer API access
+description: Tell us about an integration using the ValeMarket public API
+title: "API access: "
+labels: []
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ValeMarket read endpoints are keyless during public preview. This request helps us plan managed keys, quotas, and change notifications. GitHub issues are public; do not include credentials or private customer data.
+  - type: input
+    id: application
+    attributes:
+      label: Application name
+      description: What is the integration called?
+      placeholder: Example market tool
+    validations:
+      required: true
+  - type: dropdown
+    id: integration
+    attributes:
+      label: Integration type
+      options:
+        - Website
+        - Desktop application
+        - Mobile application
+        - Discord bot
+        - Server-side service
+        - Data analysis or research
+    validations:
+      required: true
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: Describe what the integration shows or does with observed market listings.
+      placeholder: We plan to use current listings to…
+    validations:
+      required: true
+  - type: dropdown
+    id: traffic
+    attributes:
+      label: Expected request volume
+      description: Estimate total requests across all users. Public responses are cached for 15 minutes.
+      options:
+        - Fewer than 100 requests per day
+        - 100–1,000 requests per day
+        - 1,000–10,000 requests per day
+        - More than 10,000 requests per day
+        - Not known yet
+    validations:
+      required: true
+  - type: textarea
+    id: endpoints
+    attributes:
+      label: Endpoints and data needed
+      description: Which read endpoints or fields will you use? Note anything the current API does not provide.
+    validations:
+      required: true
+  - type: checkboxes
+    id: usage
+    attributes:
+      label: Usage expectations
+      options:
+        - label: I will honor Cache-Control and ETag instead of adding cache-busting query values.
+          required: true
+        - label: I understand that listings are community observations, not completed sales or guaranteed availability.
+          required: true

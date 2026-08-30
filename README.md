@@ -7,6 +7,7 @@ ValeMarket shows currently active listings reported by contributors. It is not a
 ![ValeMarket Desktop browsing live Spirit Vale listings](docs/market.webp)
 
 - Browse the live market at [market.spiritvalers.com](https://market.spiritvalers.com/)
+- Integrate with the [public market API](https://market.spiritvalers.com/api/)
 - Download the latest Windows build from [Releases](https://github.com/bjb2/valemarket-desktop/releases/latest)
 - Report bugs through [GitHub Issues](https://github.com/bjb2/valemarket-desktop/issues)
 
@@ -99,4 +100,4 @@ assets/           Local catalog, fonts, icons, and application artwork
 test/             Contributor behavior tests
 ```
 
-The public market API is operated separately at `market-api.spiritvalers.com`.
+The public market API is operated separately at [market-api.spiritvalers.com](https://market.spiritvalers.com/api/). Its Cloudflare infrastructure, database, and deployment configuration are maintained in a private repository.
