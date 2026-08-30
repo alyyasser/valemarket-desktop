@@ -1356,22 +1356,17 @@ window.addEventListener("popstate", () => {
 
 
 async function fetchAllListings() {
-  const listings = [];
-  let generatedAt = null;
-  const now = Date.now();
-  for (let offset = 0; offset < 10_000; offset += 100) {
-    const response = await fetch(`${API}/v2/markets/global/listings?snapshot=2&sort=price-asc&limit=100&offset=${offset}`);
-    if (!response.ok) throw new Error(`market API ${response.status}`);
-    const body = await response.json();
-    if (!body || !Array.isArray(body.listings) || typeof body.generatedAt !== "string" || !Number.isFinite(Date.parse(body.generatedAt))) {
-      throw new Error("market API returned an invalid response");
-    }
-    generatedAt = generatedAt === null || body.generatedAt < generatedAt ? body.generatedAt : generatedAt;
-    listings.push(...body.listings.filter((listing) =>
-      listing.expiresAt === null || (typeof listing.expiresAt === "string" && Date.parse(listing.expiresAt) > now)));
-    if (body.listings.length < 100) return { listings, generatedAt };
+  const response = await fetch(`${API}/v2/markets/global/snapshot`);
+  if (!response.ok) throw new Error(`market API ${response.status}`);
+  const body = await response.json();
+  if (body?.marketId !== "global" || !Array.isArray(body.listings)
+      || typeof body.generatedAt !== "string" || !Number.isFinite(Date.parse(body.generatedAt))) {
+    throw new Error("market API returned an invalid response");
   }
-  throw new Error("market API pagination limit exceeded");
+  const now = Date.now();
+  const listings = body.listings.filter((listing) =>
+    listing.expiresAt === null || (typeof listing.expiresAt === "string" && Date.parse(listing.expiresAt) > now));
+  return { listings, generatedAt: body.generatedAt };
 }
 
 function publicVariant(row) {

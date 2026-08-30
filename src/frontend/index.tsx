@@ -46,14 +46,7 @@ function App() {
     const sequence = ++requestSequence.current;
     setLoading(true);
     setMarketError(undefined);
-    const url = new URL("/v2/markets/global/listings", MARKET_API_URL);
-    url.searchParams.set("sort", sort);
-    url.searchParams.set("offset", String(offset));
-    url.searchParams.set("limit", "100");
-    url.searchParams.set("snapshot", "2");
-    if (appliedMinPrice) url.searchParams.set("minPrice", appliedMinPrice);
-    if (appliedMaxPrice) url.searchParams.set("maxPrice", appliedMaxPrice);
-    if (appliedStat) url.searchParams.set("stat", appliedStat);
+    const url = new URL("/v2/markets/global/snapshot", MARKET_API_URL);
     try {
       const response = await fetch(url, {
         headers: { Accept: "application/json" },
@@ -62,8 +55,18 @@ function App() {
       if (!response.ok) throw new Error(await responseError(response));
       const data = await response.json() as ListingsResponse;
       if (sequence !== requestSequence.current) return;
-      setListings(data.listings.filter((listing) =>
-        listing.expiresAt === null || Date.parse(listing.expiresAt) > Date.now()));
+      const now = Date.now();
+      const statFilter = (appliedStat ?? "").toLowerCase();
+      const filtered = data.listings.filter((listing) =>
+        (listing.expiresAt === null || Date.parse(listing.expiresAt) > now)
+        && (appliedMinPrice === "" || listing.unitPrice >= Number(appliedMinPrice))
+        && (appliedMaxPrice === "" || listing.unitPrice <= Number(appliedMaxPrice))
+        && (statFilter === "" || listing.stats.some((stat) =>
+          String(stat.type) === appliedStat || stat.name?.toLowerCase() === statFilter)));
+      filtered.sort((left, right) =>
+        (sort === "price-desc" ? right.unitPrice - left.unitPrice : left.unitPrice - right.unitPrice)
+        || left.listingKey.localeCompare(right.listingKey));
+      setListings(filtered.slice(offset, offset + 100));
       setLastRefresh(new Date(data.generatedAt));
     } catch (error) {
       if ((error as Error).name !== "AbortError" && sequence === requestSequence.current) setMarketError(errorMessage(error));

@@ -31,7 +31,7 @@ The initial build is unsigned, so Windows may show an unknown-publisher warning.
 
 ## Market refresh
 
-ValeMarket loads the current public market snapshot when it starts. API responses are cached at Cloudflare's edge for 15 minutes, so contributors and visitors share the same bounded snapshot instead of querying the database independently.
+ValeMarket loads one complete public snapshot generated every 15 minutes. Visitors download the prebuilt snapshot instead of issuing paginated database queries.
 
 - Select **Refresh** in the header to check the current edge snapshot.
 - The desktop app refreshes automatically every 30 minutes while visible.
