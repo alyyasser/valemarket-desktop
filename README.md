@@ -20,7 +20,7 @@ ValeMarket shows currently active listings reported by contributors. It is not a
 
 ### Steps
 
-1. Download `ValeMarket-Desktop-v0.1.0-windows-x64.zip` from the latest release.
+1. Download `ValeMarket-Desktop-v<version>-windows-x64.zip` from the latest release.
 2. Extract the entire archive to a folder you can keep.
 3. Run `valemarket-desktop-win_x64.exe` from that folder.
 
@@ -30,14 +30,14 @@ The initial build is unsigned, so Windows may show an unknown-publisher warning.
 
 ## Market refresh
 
-ValeMarket loads current public listings when it starts.
+ValeMarket loads the current public market snapshot when it starts. API responses are cached at Cloudflare's edge for 15 minutes, so contributors and visitors share the same bounded snapshot instead of querying the database independently.
 
-- Select **Refresh** in the header for an immediate update.
+- Select **Refresh** in the header to check the current edge snapshot.
 - The desktop app refreshes automatically every 30 minutes while visible.
 - Returning to a window that has been in the background for at least 30 minutes also refreshes it.
 - Search text, filters, sorting, and the selected item remain in place across a refresh.
 
-Expired listings are excluded from the active market view.
+The displayed timestamp comes from the API snapshot. Expired listings are filtered again in the client and never shown, even if they expired during the cache window.
 
 ## Passive contribution
 

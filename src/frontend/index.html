@@ -1357,13 +1357,19 @@ window.addEventListener("popstate", () => {
 
 async function fetchAllListings() {
   const listings = [];
+  let generatedAt = null;
+  const now = Date.now();
   for (let offset = 0; offset < 10_000; offset += 100) {
-    const response = await fetch(`${API}/v2/markets/global/listings?sort=price-asc&limit=100&offset=${offset}`, { cache: "no-store" });
+    const response = await fetch(`${API}/v2/markets/global/listings?snapshot=2&sort=price-asc&limit=100&offset=${offset}`);
     if (!response.ok) throw new Error(`market API ${response.status}`);
     const body = await response.json();
-    if (!body || !Array.isArray(body.listings)) throw new Error("market API returned an invalid response");
-    listings.push(...body.listings);
-    if (body.listings.length < 100) return listings;
+    if (!body || !Array.isArray(body.listings) || typeof body.generatedAt !== "string" || !Number.isFinite(Date.parse(body.generatedAt))) {
+      throw new Error("market API returned an invalid response");
+    }
+    generatedAt = generatedAt === null || body.generatedAt < generatedAt ? body.generatedAt : generatedAt;
+    listings.push(...body.listings.filter((listing) =>
+      listing.expiresAt === null || (typeof listing.expiresAt === "string" && Date.parse(listing.expiresAt) > now)));
+    if (body.listings.length < 100) return { listings, generatedAt };
   }
   throw new Error("market API pagination limit exceeded");
 }
@@ -1412,7 +1418,7 @@ async function load() {
   Object.assign(state, readUrl());
   $("q").value = state.query;
   try {
-    const [catalog, listings] = await Promise.all([
+    const [catalog, snapshot] = await Promise.all([
       fetch("catalog.json?v=v2").then((response) => {
         if (!response.ok) throw new Error(`catalog ${response.status}`);
         return response.json();
@@ -1420,6 +1426,7 @@ async function load() {
       fetchAllListings(),
     ]);
     state.catalog = catalog;
+    const { listings, generatedAt } = snapshot;
     const groups = new Map();
     for (const listing of listings) {
       const group = groups.get(listing.itemId) || [];
@@ -1427,8 +1434,8 @@ async function load() {
       groups.set(listing.itemId, group);
     }
     state.manifest = {
-      date: new Date().toISOString().slice(0, 10),
-      generatedAt: new Date().toISOString(),
+      date: generatedAt.slice(0, 10),
+      generatedAt,
       totals: { listings: listings.length, items: groups.size },
     };
     state.items = [...groups.entries()].map(([itemId, rows]) => {

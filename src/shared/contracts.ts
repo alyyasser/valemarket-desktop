@@ -27,6 +27,7 @@ export interface MarketListing {
 
 export interface ListingsResponse {
   marketId: string;
+  generatedAt: string;
   listings: MarketListing[];
 }
 
@@ -34,6 +35,7 @@ export interface ItemHistoryResponse {
   marketId: string;
   itemType: number;
   itemId: string;
+  generatedAt: string;
   history: MarketListing[];
 }
 

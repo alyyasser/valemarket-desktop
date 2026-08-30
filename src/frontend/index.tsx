@@ -50,6 +50,7 @@ function App() {
     url.searchParams.set("sort", sort);
     url.searchParams.set("offset", String(offset));
     url.searchParams.set("limit", "100");
+    url.searchParams.set("snapshot", "2");
     if (appliedMinPrice) url.searchParams.set("minPrice", appliedMinPrice);
     if (appliedMaxPrice) url.searchParams.set("maxPrice", appliedMaxPrice);
     if (appliedStat) url.searchParams.set("stat", appliedStat);
@@ -61,8 +62,9 @@ function App() {
       if (!response.ok) throw new Error(await responseError(response));
       const data = await response.json() as ListingsResponse;
       if (sequence !== requestSequence.current) return;
-      setListings(data.listings);
-      setLastRefresh(new Date());
+      setListings(data.listings.filter((listing) =>
+        listing.expiresAt === null || Date.parse(listing.expiresAt) > Date.now()));
+      setLastRefresh(new Date(data.generatedAt));
     } catch (error) {
       if ((error as Error).name !== "AbortError" && sequence === requestSequence.current) setMarketError(errorMessage(error));
     } finally {
