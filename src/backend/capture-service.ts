@@ -13,7 +13,7 @@ interface DesktopSettings {
 }
 
 const defaultSettings = (): DesktopSettings => ({ schemaVersion: 1, contributionEnabled: true, deviceName: null });
-const RECONNECT_WARNING = "Market requests are visible, but linked responses are unresolved. Restart Spirit Vale while ValeMarket is already capturing, then search again.";
+const UNRESOLVED_LINK_WARNING = "Market requests are visible, but linked responses are unresolved. Share this diagnostic state; restarting alone will not fix this capture path.";
 const FRAGMENT_DROP_WARNING = "Some fragmented game messages were incomplete. Select the network adapter carrying Spirit Vale traffic directly, then search again.";
 
 export class CaptureService {
@@ -47,6 +47,12 @@ export class CaptureService {
   private running = false;
   private fragmentedMessagesReassembled = 0;
   private fragmentAssembliesDropped = 0;
+  private objectSpawnPacketsObserved = 0;
+  private objectSpawnsDecoded = 0;
+  private bulkSpawnPacketsObserved = 0;
+  private rpcLinkRegistrationsObserved = 0;
+  private resolvedInboundRpcLinks = 0;
+  private readonly unresolvedInboundRpcLinkIds = new Set<number>();
   private reconcileChain: Promise<void> = Promise.resolve();
 
   constructor(
@@ -100,7 +106,7 @@ export class CaptureService {
     const sessionSetupWarning = this.contributorState.searchRequestsDecoded > 0
       && this.contributorState.listingEventsDecoded === 0
       && this.contributorState.unresolvedInboundRpcLinks > 0
-      ? RECONNECT_WARNING
+      ? UNRESOLVED_LINK_WARNING
       : undefined;
     const fragmentDropWarning = this.contributorState.searchRequestsDecoded > 0
       && this.contributorState.listingEventsDecoded === 0
@@ -128,6 +134,12 @@ export class CaptureService {
       unresolvedInboundRpcLinks: this.contributorState.unresolvedInboundRpcLinks,
       fragmentedMessagesReassembled: this.fragmentedMessagesReassembled,
       fragmentAssembliesDropped: this.fragmentAssembliesDropped,
+      objectSpawnPacketsObserved: this.objectSpawnPacketsObserved,
+      objectSpawnsDecoded: this.objectSpawnsDecoded,
+      bulkSpawnPacketsObserved: this.bulkSpawnPacketsObserved,
+      rpcLinkRegistrationsObserved: this.rpcLinkRegistrationsObserved,
+      resolvedInboundRpcLinks: this.resolvedInboundRpcLinks,
+      unresolvedInboundRpcLinkIds: [...this.unresolvedInboundRpcLinkIds],
       droppedFlows: this.droppedFlows.map((flow) => ({ ...flow })),
       observationsPrepared: this.contributorState.prepared,
       observationsUploaded: this.contributorState.uploaded,
@@ -236,6 +248,18 @@ export class CaptureService {
 
   private consume(packet: CapturedFishNetPacket): void {
     this.packetsObserved += 1;
+    if (packet.packetName === "objectSpawn") {
+      this.objectSpawnPacketsObserved += 1;
+      if (packet.objectId !== undefined) this.objectSpawnsDecoded += 1;
+      this.rpcLinkRegistrationsObserved += packet.rpcLinkRegistrations?.length ?? 0;
+    } else if (packet.packetName === "bulkSpawnOrDespawn") {
+      this.bulkSpawnPacketsObserved += 1;
+    } else if (packet.packetName === "rpcLink" && packet.liteNetPacket.udpPacket.direction === "inbound") {
+      if (packet.linkResolved === true) this.resolvedInboundRpcLinks += 1;
+      else if (packet.linkResolved === false && packet.linkId !== undefined && this.unresolvedInboundRpcLinkIds.size < 16) {
+        this.unresolvedInboundRpcLinkIds.add(packet.linkId);
+      }
+    }
     this.contributor?.consume(packet);
   }
 }

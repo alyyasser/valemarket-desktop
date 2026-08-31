@@ -647,6 +647,10 @@ function renderCollector() {
       + ((desktopState.unresolvedInboundRpcLinks ?? 0) > 0 ? ` · ${desktopState.unresolvedInboundRpcLinks.toLocaleString()} unresolved inbound links` : "")
       + ((desktopState.fragmentedMessagesReassembled ?? 0) > 0 ? ` · ${desktopState.fragmentedMessagesReassembled.toLocaleString()} fragmented messages restored` : "")
       + ((desktopState.fragmentAssembliesDropped ?? 0) > 0 ? ` · ${desktopState.fragmentAssembliesDropped.toLocaleString()} incomplete fragmented messages` : "")
+      + ((desktopState.objectSpawnPacketsObserved ?? 0) > 0 || (desktopState.bulkSpawnPacketsObserved ?? 0) > 0
+        ? ` · ${(desktopState.objectSpawnsDecoded ?? 0).toLocaleString()}/${(desktopState.objectSpawnPacketsObserved ?? 0).toLocaleString()} object spawns decoded · ${(desktopState.rpcLinkRegistrationsObserved ?? 0).toLocaleString()} link registrations · ${(desktopState.bulkSpawnPacketsObserved ?? 0).toLocaleString()} bulk spawns · ${(desktopState.resolvedInboundRpcLinks ?? 0).toLocaleString()} resolved inbound links`
+        : "")
+      + ((desktopState.unresolvedInboundRpcLinkIds?.length ?? 0) > 0 ? ` · unresolved IDs ${desktopState.unresolvedInboundRpcLinkIds.join(", ")}` : "")
       + (unattributedPackets > 0 ? ` · ${unattributedPackets.toLocaleString()} unattributed (${gameTrafficFlows} game-like flows)` : "")
     : "";
   $("collector-enabled").checked = desktopState?.contributionEnabled === true;

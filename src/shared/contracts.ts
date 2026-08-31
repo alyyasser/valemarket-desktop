@@ -86,6 +86,12 @@ export interface DesktopState {
   unresolvedInboundRpcLinks: number;
   fragmentedMessagesReassembled: number;
   fragmentAssembliesDropped: number;
+  objectSpawnPacketsObserved: number;
+  objectSpawnsDecoded: number;
+  bulkSpawnPacketsObserved: number;
+  rpcLinkRegistrationsObserved: number;
+  resolvedInboundRpcLinks: number;
+  unresolvedInboundRpcLinkIds: number[];
   droppedFlows: Array<{
     flow: string;
     packets: number;

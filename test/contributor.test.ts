@@ -233,7 +233,7 @@ describe("market upload contract", () => {
     const service = new CaptureService("unused", "0.1.4");
     Object.assign(contributorStateOf(service), contributor.snapshot());
     expect(service.state().warning).toBe(
-      "Market requests are visible, but linked responses are unresolved. Restart Spirit Vale while ValeMarket is already capturing, then search again.",
+      "Market requests are visible, but linked responses are unresolved. Share this diagnostic state; restarting alone will not fix this capture path.",
     );
 
     trackerOf(contributor).consume = () => [searchEvent(2)];
@@ -258,6 +258,42 @@ describe("market upload contract", () => {
       { flow: "udp 10.0.0.2:5000 <-> 203.0.113.5:6000", packets: 33, verdict: "unknown" },
     ]);
   });
+  test("separates spawn parsing from RPC-link resolution", () => {
+    const service = new CaptureService("unused", "0.1.7");
+    const consume = consumeOf(service);
+    consume({
+      packetName: "objectSpawn",
+      objectId: 5,
+      rpcLinkRegistrations: [{ linkId: 22 }, { linkId: 23 }],
+    } as CapturedFishNetPacket);
+    consume({ packetName: "objectSpawn" } as CapturedFishNetPacket);
+    consume({ packetName: "bulkSpawnOrDespawn" } as CapturedFishNetPacket);
+    consume({
+      packetName: "rpcLink",
+      linkId: 22,
+      linkResolved: true,
+      liteNetPacket: { udpPacket: { direction: "inbound" } },
+    } as CapturedFishNetPacket);
+    const unresolved = {
+      packetName: "rpcLink",
+      linkId: 907,
+      linkResolved: false,
+      liteNetPacket: { udpPacket: { direction: "inbound" } },
+    } as CapturedFishNetPacket;
+    consume(unresolved);
+    consume(unresolved);
+
+    expect(service.state()).toMatchObject({
+      packetsObserved: 6,
+      objectSpawnPacketsObserved: 2,
+      objectSpawnsDecoded: 1,
+      bulkSpawnPacketsObserved: 1,
+      rpcLinkRegistrationsObserved: 2,
+      resolvedInboundRpcLinks: 1,
+      unresolvedInboundRpcLinkIds: [907],
+    });
+  });
+
 });
 
 interface MarketContributorInternals {
@@ -276,6 +312,7 @@ interface CaptureServiceInternals {
     ): boolean;
   };
   contributorState: ContributorSnapshot;
+  consume(packet: CapturedFishNetPacket): void;
 }
 
 function captureOf(service: CaptureService): CaptureServiceInternals["capture"] {
@@ -288,6 +325,11 @@ function contributorStateOf(service: CaptureService): ContributorSnapshot {
   // Tests inject an observed contributor snapshot without starting the desktop service.
   const internals = service as unknown as CaptureServiceInternals;
   return internals.contributorState;
+}
+
+function consumeOf(service: CaptureService): (packet: CapturedFishNetPacket) => void {
+  const internals = service as unknown as CaptureServiceInternals;
+  return (packet) => internals.consume(packet);
 }
 
 function searchEvent(sequence: number): FishNetMarketEvent {
