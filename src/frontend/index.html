@@ -312,7 +312,7 @@ header{
   </div>
   <div class="capture-state">
     <span class="capture-dot" id="collector-panel-dot"></span>
-    <div><strong id="collector-detail">Connecting to desktop service</strong><span id="collector-counts">Market browsing remains available</span></div>
+    <div><strong id="collector-detail">Connecting to desktop service</strong><span id="collector-counts">Market browsing remains available</span><span id="collector-diagnostics"></span><span id="collector-filtering"></span></div>
   </div>
   <label class="capture-setting">
     <span><strong>Share observations</strong><small>On by default</small></span>
@@ -635,6 +635,17 @@ function renderCollector() {
   $("collector-counts").textContent = desktopState
     ? `${desktopState.observationsPrepared.toLocaleString()} prepared · ${desktopState.observationsUploaded.toLocaleString()} uploaded · ${desktopState.queuedBatches.toLocaleString()} queued`
     : "Market browsing remains available";
+  $("collector-diagnostics").textContent = desktopState
+    ? `${desktopState.packetsObserved.toLocaleString()} game packets · ${(desktopState.marketEventsDecoded ?? 0).toLocaleString()} market events · ${(desktopState.listingEventsDecoded ?? 0).toLocaleString()} listing responses`
+    : "";
+  const droppedFlows = desktopState?.droppedFlows ?? [];
+  const unattributedPackets = droppedFlows.reduce((total, flow) => total + flow.packets, 0);
+  const gameTrafficFlows = droppedFlows.filter((flow) => flow.verdict === "game traffic").length;
+  $("collector-filtering").textContent = desktopState
+    ? `${(desktopState.listingsDecoded ?? 0).toLocaleString()} listings decoded · ${(desktopState.observationsNormalized ?? 0).toLocaleString()} normalized · ${(desktopState.normalizationDropped ?? 0).toLocaleString()} dropped · ${(desktopState.duplicatesSuppressed ?? 0).toLocaleString()} duplicates`
+      + ((desktopState.normalizationErrors ?? 0) > 0 ? ` · ${desktopState.normalizationErrors.toLocaleString()} errors` : "")
+      + (unattributedPackets > 0 ? ` · ${unattributedPackets.toLocaleString()} unattributed (${gameTrafficFlows} game-like flows)` : "")
+    : "";
   $("collector-enabled").checked = desktopState?.contributionEnabled === true;
   $("collector-enabled").disabled = collectorBusy || !desktopState;
   $("collector-device").disabled = collectorBusy || desktopState?.npcap?.availability !== "ready";

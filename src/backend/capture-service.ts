@@ -19,13 +19,25 @@ export class CaptureService {
   private readonly contributorPath: string;
   private settings: DesktopSettings = defaultSettings();
   private contributor?: MarketContributor;
-  private contributorState: ContributorSnapshot = { prepared: 0, uploaded: 0, queuedBatches: 0 };
+  private contributorState: ContributorSnapshot = {
+    prepared: 0,
+    uploaded: 0,
+    queuedBatches: 0,
+    marketEventsDecoded: 0,
+    listingEventsDecoded: 0,
+    listingsDecoded: 0,
+    observationsNormalized: 0,
+    normalizationDropped: 0,
+    normalizationErrors: 0,
+    duplicatesSuppressed: 0,
+  };
   private npcap: DesktopState["npcap"] = { availability: "error", detail: "Checking Npcap…" };
   private gameDetected = false;
   private packetsObserved = 0;
   private phase: DesktopState["phase"] = "disabled";
   private detail = "Starting contribution…";
   private warning?: string;
+  private droppedFlows: DesktopState["droppedFlows"] = [];
   private running = false;
   private reconcileChain: Promise<void> = Promise.resolve();
 
@@ -38,11 +50,14 @@ export class CaptureService {
     this.capture.on("started", () => {
       this.running = true;
       this.phase = this.gameDetected ? "capturing" : "waiting-for-game";
-      this.detail = this.gameDetected ? "Observing market traffic" : "Waiting for Spirit Vale";
+      this.detail = this.gameDetected ? "Observing game traffic" : "Waiting for Spirit Vale";
     });
     this.capture.on("targetStatus", (status) => this.targetStatus(status));
     this.capture.on("fishNetPacket", (packet) => this.consume(packet));
     this.capture.on("warning", (message) => { this.warning = message; });
+    this.capture.on("droppedFlows", (flows) => {
+      this.droppedFlows = flows.map((flow) => ({ ...flow }));
+    });
     this.capture.on("error", (error) => {
       this.running = false;
       this.phase = "error";
@@ -74,6 +89,14 @@ export class CaptureService {
       npcap: this.npcap,
       gameDetected: this.gameDetected,
       packetsObserved: this.packetsObserved,
+      marketEventsDecoded: this.contributorState.marketEventsDecoded,
+      listingEventsDecoded: this.contributorState.listingEventsDecoded,
+      listingsDecoded: this.contributorState.listingsDecoded,
+      observationsNormalized: this.contributorState.observationsNormalized,
+      normalizationDropped: this.contributorState.normalizationDropped,
+      normalizationErrors: this.contributorState.normalizationErrors,
+      duplicatesSuppressed: this.contributorState.duplicatesSuppressed,
+      droppedFlows: this.droppedFlows.map((flow) => ({ ...flow })),
       observationsPrepared: this.contributorState.prepared,
       observationsUploaded: this.contributorState.uploaded,
       queuedBatches: this.contributorState.queuedBatches,
@@ -150,6 +173,7 @@ export class CaptureService {
     this.phase = "waiting-for-game";
     this.detail = "Starting packet capture…";
     try {
+      this.droppedFlows = [];
       await this.capture.start({
         protocols: ["udp"],
         targetProcessName: "SpiritVale.exe",
@@ -177,7 +201,7 @@ export class CaptureService {
     this.gameDetected = status.state === "active";
     if (!this.running) return;
     this.phase = this.gameDetected ? "capturing" : "waiting-for-game";
-    this.detail = this.gameDetected ? "Observing market traffic" : "Waiting for Spirit Vale";
+    this.detail = this.gameDetected ? "Observing game traffic" : "Waiting for Spirit Vale";
   }
 
   private consume(packet: CapturedFishNetPacket): void {

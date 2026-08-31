@@ -5,6 +5,7 @@ import path from "node:path";
 import type { CapturedFishNetPacket } from "@kar-mi/spirit-vale-tools-capture";
 import type { FishNetMarketEvent, FishNetMarketListing } from "@kar-mi/spirit-vale-tools-market";
 import { MarketContributor } from "../src/backend/contributor.ts";
+import { CaptureService } from "../src/backend/capture-service.ts";
 import { canonicalObservationPayload, sha256Hex, type MarketObservationBatch } from "../src/backend/market-contracts.ts";
 import { normalizeListing } from "../src/backend/normalizer.ts";
 
@@ -166,6 +167,51 @@ describe("market upload contract", () => {
     expect(state.outbox[0]?.attempts).toBe(1);
     expect(state.outbox[0]?.batch.observations).toHaveLength(50);
   });
+
+  test("distinguishes market events, normalization drops, and duplicates", async () => {
+    const statePath = await createStatePath();
+    const contributor = await MarketContributor.load({
+      statePath,
+      collectorVersion: "test-collector",
+    });
+    contributor.setEnabled(true);
+    const droppedEvent = searchEvent(1);
+    if (droppedEvent.kind !== "searchPage") throw new Error("expected search page");
+    droppedEvent.page.listings[0]!.item.itemId = null;
+    const eventBatches: FishNetMarketEvent[][] = [
+      [{ kind: "collectResult", tick: 0, success: true, message: null }, searchEvent(0)],
+      [searchEvent(0)],
+      [droppedEvent],
+    ];
+    trackerOf(contributor).consume = () => eventBatches.shift() ?? [];
+
+    contributor.consume({} as CapturedFishNetPacket);
+    contributor.consume({} as CapturedFishNetPacket);
+    contributor.consume({} as CapturedFishNetPacket);
+    await contributor.shutdown();
+
+    expect(contributor.snapshot()).toMatchObject({
+      marketEventsDecoded: 4,
+      listingEventsDecoded: 3,
+      listingsDecoded: 3,
+      observationsNormalized: 2,
+      normalizationDropped: 1,
+      normalizationErrors: 0,
+      duplicatesSuppressed: 1,
+      prepared: 1,
+    });
+  });
+
+  test("surfaces dropped-flow verdicts in desktop state", () => {
+    const service = new CaptureService("unused", "0.1.3");
+    captureOf(service).emit("droppedFlows", [
+      { flow: "udp 10.0.0.2:5000 <-> 203.0.113.5:6000", packets: 33, verdict: "unknown" },
+    ]);
+
+    expect(service.state().droppedFlows).toEqual([
+      { flow: "udp 10.0.0.2:5000 <-> 203.0.113.5:6000", packets: 33, verdict: "unknown" },
+    ]);
+  });
 });
 
 interface MarketContributorInternals {
@@ -174,6 +220,19 @@ interface MarketContributorInternals {
 
 function trackerOf(contributor: MarketContributor): MarketContributorInternals["tracker"] {
   return (contributor as unknown as MarketContributorInternals).tracker;
+}
+
+interface CaptureServiceInternals {
+  capture: {
+    emit(
+      event: "droppedFlows",
+      flows: Array<{ flow: string; packets: number; verdict: "game traffic" | "unrelated" | "unknown" }>,
+    ): boolean;
+  };
+}
+
+function captureOf(service: CaptureService): CaptureServiceInternals["capture"] {
+  return (service as unknown as CaptureServiceInternals).capture;
 }
 
 function searchEvent(sequence: number): FishNetMarketEvent {

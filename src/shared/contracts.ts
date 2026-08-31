@@ -75,6 +75,18 @@ export interface DesktopState {
   };
   gameDetected: boolean;
   packetsObserved: number;
+  marketEventsDecoded: number;
+  listingEventsDecoded: number;
+  listingsDecoded: number;
+  observationsNormalized: number;
+  normalizationDropped: number;
+  normalizationErrors: number;
+  duplicatesSuppressed: number;
+  droppedFlows: Array<{
+    flow: string;
+    packets: number;
+    verdict: "game traffic" | "unrelated" | "unknown";
+  }>;
   observationsPrepared: number;
   observationsUploaded: number;
   queuedBatches: number;

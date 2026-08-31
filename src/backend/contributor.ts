@@ -38,6 +38,13 @@ export interface ContributorSnapshot {
   prepared: number;
   uploaded: number;
   queuedBatches: number;
+  marketEventsDecoded: number;
+  listingEventsDecoded: number;
+  listingsDecoded: number;
+  observationsNormalized: number;
+  normalizationDropped: number;
+  normalizationErrors: number;
+  duplicatesSuppressed: number;
   latestObservationAt?: string;
   latestUploadAt?: string;
   warning?: string;
@@ -76,7 +83,18 @@ export class MarketContributor {
     this.now = options.now ?? (() => new Date());
     this.recentOrder = [...state.recentKeys];
     for (const key of this.recentOrder) this.recent.add(key);
-    this.metrics = { prepared: 0, uploaded: 0, queuedBatches: state.outbox.length };
+    this.metrics = {
+      prepared: 0,
+      uploaded: 0,
+      queuedBatches: state.outbox.length,
+      marketEventsDecoded: 0,
+      listingEventsDecoded: 0,
+      listingsDecoded: 0,
+      observationsNormalized: 0,
+      normalizationDropped: 0,
+      normalizationErrors: 0,
+      duplicatesSuppressed: 0,
+    };
   }
 
   static async load(options: MarketContributorOptions): Promise<MarketContributor> {
@@ -113,12 +131,39 @@ export class MarketContributor {
       return;
     }
     if (events.length === 0) return;
+    const decoded = events.map((event) => {
+      let listingCount: number | undefined;
+      if (event.kind === "searchPage") listingCount = event.page.listings.length;
+      if (event.kind === "stallListings") {
+        listingCount = (event.listings ?? []).filter((listing) => listing !== null).length;
+      }
+      return { event, listingCount };
+    });
+    this.metrics.marketEventsDecoded += decoded.length;
+    for (const result of decoded) {
+      if (result.listingCount === undefined) continue;
+      this.metrics.listingEventsDecoded += 1;
+      this.metrics.listingsDecoded += result.listingCount;
+    }
+    this.publish();
     this.enqueue(async () => {
       if (!this.enabled || this.stopped) return;
-      for (const event of events) {
-        const observations = await normalizeMarketEvent(event, this.now());
+      for (const result of decoded) {
+        let observations;
+        try {
+          observations = await normalizeMarketEvent(result.event, this.now());
+        } catch (error) {
+          this.metrics.normalizationErrors += 1;
+          this.publish();
+          throw error;
+        }
+        this.metrics.observationsNormalized += observations.length;
+        if (result.listingCount !== undefined) {
+          this.metrics.normalizationDropped += Math.max(0, result.listingCount - observations.length);
+        }
         for (const observation of observations) this.addObservation(observation);
       }
+      this.publish();
       if (this.pending.size >= FLUSH_OBSERVATIONS) {
         await this.flushPending();
         await this.uploadOutbox();
@@ -141,7 +186,10 @@ export class MarketContributor {
 
   private addObservation(observation: MarketUploadObservation): void {
     const key = deduplicationKey(observation);
-    if (this.recent.has(key) || this.pending.has(key)) return;
+    if (this.recent.has(key) || this.pending.has(key)) {
+      this.metrics.duplicatesSuppressed += 1;
+      return;
+    }
     this.pending.set(key, observation);
     this.recent.add(key);
     this.recentOrder.push(key);
