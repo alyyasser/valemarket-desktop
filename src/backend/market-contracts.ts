@@ -9,6 +9,19 @@ export interface MarketUploadStat {
   percent: boolean;
 }
 
+export interface MarketUploadGem {
+  itemId: string;
+  refine: number;
+}
+
+export interface MarketUploadEnhancements {
+  refine: number;
+  startingPotential: number;
+  spentPotential: number;
+  cards: string[];
+  gems: MarketUploadGem[];
+}
+
 export interface MarketUploadObservation {
   reportId: string;
   listingKey: string;
@@ -21,6 +34,7 @@ export interface MarketUploadObservation {
   quantity: number;
   status: number;
   stats: MarketUploadStat[];
+  enhancements?: MarketUploadEnhancements;
   observedAt: string;
   expiresAt: string | null;
 }

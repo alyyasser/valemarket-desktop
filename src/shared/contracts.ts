@@ -8,6 +8,19 @@ export interface MarketStat {
   percent: boolean;
 }
 
+export interface MarketGem {
+  itemId: string;
+  refine: number;
+}
+
+export interface MarketEnhancements {
+  refine: number;
+  startingPotential: number;
+  spentPotential: number;
+  cards: string[];
+  gems: MarketGem[];
+}
+
 export interface MarketListing {
   marketId: string;
   listingKey: string;
@@ -20,6 +33,7 @@ export interface MarketListing {
   quantity: number;
   status: number;
   stats: MarketStat[];
+  enhancements?: MarketEnhancements;
   firstSeenAt: string;
   lastSeenAt: string;
   expiresAt: string | null;

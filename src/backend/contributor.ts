@@ -376,8 +376,22 @@ function isObservation(value: unknown): value is MarketUploadObservation {
     && typeof value.quantity === "number" && Number.isSafeInteger(value.quantity)
     && typeof value.status === "number" && Number.isSafeInteger(value.status)
     && Array.isArray(value.stats)
+    && (value.enhancements === undefined || isEnhancements(value.enhancements))
     && typeof value.observedAt === "string"
     && (typeof value.expiresAt === "string" || value.expiresAt === null);
+}
+
+function isEnhancements(value: unknown): boolean {
+  if (!isRecord(value)
+      || !Number.isSafeInteger(value.refine) || Number(value.refine) < 0
+      || !Number.isSafeInteger(value.startingPotential) || Number(value.startingPotential) < 0
+      || !Number.isSafeInteger(value.spentPotential) || Number(value.spentPotential) < 0
+      || !Array.isArray(value.cards) || value.cards.length > 16
+      || !value.cards.every((card) => typeof card === "string" && card.length > 0 && card.length <= 256)
+      || !Array.isArray(value.gems) || value.gems.length > 16) return false;
+  return value.gems.every((gem) => isRecord(gem)
+    && typeof gem.itemId === "string" && gem.itemId.length > 0 && gem.itemId.length <= 256
+    && Number.isSafeInteger(gem.refine) && Number(gem.refine) >= 0);
 }
 
 function deduplicationKey(observation: MarketUploadObservation): string {

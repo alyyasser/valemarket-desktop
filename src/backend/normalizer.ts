@@ -9,6 +9,8 @@ import {
 import {
   canonicalObservationPayload,
   sha256Hex,
+  type MarketUploadEnhancements,
+  type MarketUploadGem,
   type MarketUploadObservation,
   type MarketUploadStat,
 } from "./market-contracts.ts";
@@ -57,6 +59,7 @@ export async function normalizeListing(
     ...(stat.value === undefined ? {} : { value: stat.value }),
     percent: stat.percent,
   }));
+  const enhancements = parseMarketEnhancements(listing.item.payloadJson);
   const observedAt = listing.updatedAt > 0n
     ? unixSecondsToIso(listing.updatedAt, "listing update")
     : capturedAt.toISOString();
@@ -75,11 +78,73 @@ export async function normalizeListing(
     quantity: listing.availableQuantity,
     status: listing.status,
     stats,
+    ...(enhancements === undefined ? {} : { enhancements }),
     observedAt,
     expiresAt,
   };
   observation.payloadHash = await sha256Hex(canonicalObservationPayload(observation));
   return observation;
+}
+
+export function parseMarketEnhancements(payloadJson: string | null): MarketUploadEnhancements | undefined {
+  if (payloadJson === null) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(payloadJson);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(value)) return undefined;
+  const keys = ["Refine", "StartingPotential", "SpentPotential", "Cards", "Gems"];
+  if (!keys.some((key) => Object.hasOwn(value, key))) return undefined;
+
+  const refine = enhancementInteger(value.Refine);
+  const startingPotential = enhancementInteger(value.StartingPotential);
+  const spentPotential = enhancementInteger(value.SpentPotential);
+  const cards = enhancementCards(value.Cards);
+  const gems = enhancementGems(value.Gems);
+  if (refine === undefined
+      || startingPotential === undefined
+      || spentPotential === undefined
+      || cards === undefined
+      || gems === undefined) return undefined;
+  return { refine, startingPotential, spentPotential, cards, gems };
+}
+
+function enhancementInteger(value: unknown): number | undefined {
+  if (value === undefined || value === null) return 0;
+  return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : undefined;
+}
+
+function enhancementCards(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > 16) return undefined;
+  const cards: string[] = [];
+  for (const card of value) {
+    if (typeof card !== "string" || card.length === 0 || card.length > 256) return undefined;
+    cards.push(card);
+  }
+  return cards;
+}
+
+function enhancementGems(value: unknown): MarketUploadGem[] | undefined {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > 16) return undefined;
+  const gems: MarketUploadGem[] = [];
+  for (const gem of value) {
+    if (!isRecord(gem)
+        || typeof gem.Id !== "string"
+        || gem.Id.length === 0
+        || gem.Id.length > 256) return undefined;
+    const refine = enhancementInteger(gem.Refine);
+    if (refine === undefined) return undefined;
+    gems.push({ itemId: gem.Id, refine });
+  }
+  return gems;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function safeBigInt(value: bigint, label: string): number {

@@ -6,6 +6,7 @@ import type { CapturedFishNetPacket } from "@kar-mi/spirit-vale-tools-capture";
 import type { FishNetMarketEvent, FishNetMarketListing } from "@kar-mi/spirit-vale-tools-market";
 import { MarketContributor } from "../src/backend/contributor.ts";
 import { canonicalObservationPayload, sha256Hex, type MarketObservationBatch } from "../src/backend/market-contracts.ts";
+import { normalizeListing } from "../src/backend/normalizer.ts";
 
 let temporaryRoot: string | undefined;
 
@@ -28,6 +29,79 @@ describe("market upload contract", () => {
     });
     expect(payload).toBe('[1,"Flax","Flax",10,58,1,[],"2026-09-01T16:05:50.000Z"]');
     expect(await sha256Hex(payload)).toBe("4930103c67eb9e98267f00190a63ae0edf4b9833e04250be87e5345327b794ad");
+  });
+
+  test("keeps captured enhancements outside listing identity", async () => {
+    const observation = {
+      itemType: 3,
+      itemId: "Stormcall Kunai",
+      displayName: "Stormcall Kunai",
+      unitPrice: 100_000,
+      quantity: 1,
+      status: 1,
+      stats: [],
+      expiresAt: null,
+    };
+    const baseline = canonicalObservationPayload(observation);
+    const enrichedObservation = {
+      ...observation,
+      enhancements: {
+        refine: 7,
+        startingPotential: 20,
+        spentPotential: 4,
+        cards: ["Wolf Card"],
+        gems: [{ itemId: "Ruby", refine: 3 }],
+      },
+    };
+    const enriched = canonicalObservationPayload(enrichedObservation);
+    expect(enriched).toBe(baseline);
+    expect(await sha256Hex(enriched)).toBe(await sha256Hex(baseline));
+  });
+
+  test("normalizes equipment potential, refine, and cards", async () => {
+    const source = listing(0);
+    source.item.itemId = "Stormcall Kunai";
+    source.item.payloadJson = JSON.stringify({
+      Id: "Stormcall Kunai",
+      Refine: 7,
+      StartingPotential: 20,
+      SpentPotential: 4,
+      Cards: ["Wolf Card", "Bat Card"],
+      Substats: [],
+    });
+    const observation = await normalizeListing(source);
+    expect(observation?.enhancements).toEqual({
+      refine: 7,
+      startingPotential: 20,
+      spentPotential: 4,
+      cards: ["Wolf Card", "Bat Card"],
+      gems: [],
+    });
+  });
+
+  test("normalizes artifact gems and their refine levels", async () => {
+    const source = listing(1);
+    source.item.itemId = "Holy Vow";
+    source.item.payloadJson = JSON.stringify({
+      Id: "Acolyte",
+      Refine: 9,
+      Gems: [
+        { Id: "Ruby", Refine: 3 },
+        { Id: "Sapphire", Refine: 5 },
+      ],
+      Substats: [],
+    });
+    const observation = await normalizeListing(source);
+    expect(observation?.enhancements).toEqual({
+      refine: 9,
+      startingPotential: 0,
+      spentPotential: 0,
+      cards: [],
+      gems: [
+        { itemId: "Ruby", refine: 3 },
+        { itemId: "Sapphire", refine: 5 },
+      ],
+    });
   });
 
   test("registers once and uploads a privacy-safe 50-observation batch", async () => {

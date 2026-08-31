@@ -198,6 +198,15 @@ header{
 }
 .stat:only-child{grid-column:1/-1}
 .stat b{flex:none;color:var(--acc2);font:650 11.5px var(--font-mono)}
+.stats.single-stat .stat{grid-column:1/-1}
+.enhancement-rail{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:5px;align-items:center;padding-top:1px}
+.enhance{
+  display:inline-flex;align-items:baseline;gap:4px;min-width:0;padding:3px 6px;
+  border:1px solid #5e4e28;border-radius:999px;background:rgba(217,178,74,.08);
+  color:var(--gold);font-size:10.5px;line-height:1.2;
+}
+.enhance-label{color:var(--faint);font-size:8.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase}
+.enhance b{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--ink-strong);font:650 10.5px var(--font-mono)}
 .chaos{align-self:center;color:var(--chaos-ink);font-weight:700;font-size:10.5px;letter-spacing:.04em;text-transform:uppercase}
 @media(max-width:520px){.stats{grid-template-columns:1fr}}
 .price-label{margin-right:7px;color:var(--faint);font-size:9px;font-weight:700;letter-spacing:.08em}
@@ -350,7 +359,7 @@ header{
 <script type="module">
 const API = "https://market-api.spiritvalers.com";
 const KINDS = [
-  { id: "All", label: "On the board" },
+  { id: "All", label: "All" },
   { id: "Equipment", label: "Equipment" },
   { id: "Card", label: "Cards" },
   { id: "Gem", label: "Gems" },
@@ -760,6 +769,30 @@ function formatStat(stat) {
   const sign = stat.displayValue > 0 ? "+" : "";
   return `<span class="stat">${escapeHtml(label)} <b>${sign}${stat.displayValue}</b></span>`;
 }
+function enhancementHTML(enhancements) {
+  if (!enhancements || typeof enhancements !== "object") return "";
+  const tags = [];
+  const refine = Number.isSafeInteger(enhancements.refine) ? enhancements.refine : 0;
+  const starting = Number.isSafeInteger(enhancements.startingPotential) ? enhancements.startingPotential : 0;
+  const spent = Number.isSafeInteger(enhancements.spentPotential) ? enhancements.spentPotential : 0;
+  if (refine > 0) {
+    tags.push(`<span class="enhance"><span class="enhance-label">Refine</span><b>+${refine}</b></span>`);
+  }
+  if (starting > 0) {
+    tags.push(`<span class="enhance"><span class="enhance-label">Potential</span><b>${Math.max(0, starting - spent)}/${starting}</b></span>`);
+  }
+  for (const card of Array.isArray(enhancements.cards) ? enhancements.cards : []) {
+    tags.push(`<span class="enhance"><span class="enhance-label">Card</span><b>${escapeHtml(card)}</b></span>`);
+  }
+  for (const gem of Array.isArray(enhancements.gems) ? enhancements.gems : []) {
+    const gemRefine = Number.isSafeInteger(gem?.refine) && gem.refine > 0 ? ` +${gem.refine}` : "";
+    tags.push(`<span class="enhance"><span class="enhance-label">Gem</span><b>${escapeHtml(gem?.itemId || "Unknown")}${gemRefine}</b></span>`);
+  }
+  return tags.length
+    ? `<span class="enhancement-rail" aria-label="Enhancements">${tags.join("")}</span>`
+    : "";
+}
+
 
 function statHay(stat) {
   const value = stat.valueText ?? stat.displayValue;
@@ -768,7 +801,16 @@ function statHay(stat) {
 
 function variantHay(variant) {
   const slot = ART_SLOTS[variant.artifactSlot] || "";
-  return `${(variant.stats || []).map(statHay).join(" ")} ${variant.chaos ? "chaos" : ""} ${slot}`.toLowerCase();
+  const enhancements = variant.enhancements || {};
+  const enhancementText = [
+    enhancements.refine > 0 ? `refine +${enhancements.refine}` : "",
+    enhancements.startingPotential > 0
+      ? `potential ${Math.max(0, enhancements.startingPotential - enhancements.spentPotential)}/${enhancements.startingPotential}`
+      : "",
+    ...(Array.isArray(enhancements.cards) ? enhancements.cards : []),
+    ...(Array.isArray(enhancements.gems) ? enhancements.gems.map((gem) => `${gem.itemId} +${gem.refine}`) : []),
+  ].filter(Boolean).join(" ");
+  return `${(variant.stats || []).map(statHay).join(" ")} ${enhancementText} ${variant.chaos ? "chaos" : ""} ${slot}`.toLowerCase();
 }
 
 function familyKey(variant) {
@@ -1185,7 +1227,7 @@ function renderInspector() {
     ${item.fungible ? depthDetails(view?.depth) : ""}
     ${item.fungible ? "" : `<div class="modes">
       <button type="button" class="chip${state.family ? "" : " on"}" data-family="0">All rolls</button>
-      <button type="button" class="chip${state.family ? " on" : ""}" data-family="1">Same stats</button>
+      <button type="button" class="chip${state.family ? " on" : ""}" data-family="1">Same rolls</button>
     </div>`}
     ${body}`;
 }
@@ -1199,9 +1241,9 @@ function variantRow(variant) {
   const mark = variant.published
     ? "confirmed"
     : unique ? "one listing" : `${variant.listingCount} listings`;
-  const stats = (variant.stats || []).length
-    ? variant.stats.map(formatStat).join("")
-    : "";
+  const statRows = variant.stats || [];
+  const stats = statRows.length ? statRows.map(formatStat).join("") : "";
+  const enhancements = enhancementHTML(variant.enhancements);
   const details = [
     stats,
     variant.chaos ? '<span class="chaos">chaos</span>' : "",
@@ -1212,7 +1254,7 @@ function variantRow(variant) {
     : `listed ${ago(variant.lastSeenAt)} ago`;
   const expiry = expiryHTML(variant.expiresAt);
   return `<div class="vrow">
-    ${details ? `<div class="stats">${details}</div>` : ""}
+    ${details || enhancements ? `<div class="stats${statRows.length === 1 ? " single-stat" : ""}">${details}${enhancements}</div>` : ""}
     <div class="vmeta"><span class="p">${price}</span><span class="s">${mark} · ${span}${expiry ? ` · ${expiry}` : ""}</span></div>
   </div>`;
 }
@@ -1390,6 +1432,7 @@ function publicVariant(row) {
     quantity: row.quantity,
     status: row.status,
     stats,
+    enhancements: row.enhancements && typeof row.enhancements === "object" ? row.enhancements : null,
     chaos: false,
     artifactSlot: null,
     depth: null,
