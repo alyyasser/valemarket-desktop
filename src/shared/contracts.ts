@@ -84,6 +84,8 @@ export interface DesktopState {
   normalizationErrors: number;
   duplicatesSuppressed: number;
   unresolvedInboundRpcLinks: number;
+  fragmentedMessagesReassembled: number;
+  fragmentAssembliesDropped: number;
   droppedFlows: Array<{
     flow: string;
     packets: number;

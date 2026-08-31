@@ -202,7 +202,7 @@ describe("market upload contract", () => {
     });
   });
 
-  test("diagnoses capture started after inbound RPC links were registered", async () => {
+  test("diagnoses genuinely unresolved inbound RPC links", async () => {
     const contributor = await MarketContributor.load({
       statePath: await createStatePath(),
       collectorVersion: "test-collector",

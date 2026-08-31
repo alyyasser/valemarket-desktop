@@ -46,7 +46,8 @@ Contribution is enabled by default. Open **Contributor** in the header to turn i
 
 When Npcap is available, ValeMarket observes Spirit Vale market traffic locally and uploads normalized listing observations to the community API. New contributors are eligible immediately; a single eligible contributor is sufficient for the launch policy.
 
-Start ValeMarket before launching Spirit Vale so capture observes the session's RPC-link setup. If the Contributor panel reports unresolved linked responses, keep ValeMarket capturing, fully exit and relaunch Spirit Vale, then run the market search again.
+ValeMarket reassembles fragmented LiteNetLib messages before FishNet decoding, including large market result pages. Starting ValeMarket before Spirit Vale still preserves the full session setup. If the Contributor panel reports unresolved linked responses, keep ValeMarket capturing, fully exit and relaunch Spirit Vale, then search again. If it reports incomplete fragmented messages, select the adapter carrying Spirit Vale traffic directly.
+
 Uploads include the listing price, quantity, status, displayed stats, and visible refine, potential, card, gem, and gem-refine metadata.
 
 ValeMarket does **not** upload:

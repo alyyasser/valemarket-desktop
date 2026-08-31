@@ -2,6 +2,7 @@ import path from "node:path";
 import { PacketCapture, getNpcapStatus, listNpcapDevices, type NpcapDevice } from "@kar-mi/spirit-vale-tools-capture/capture";
 import type { CaptureTargetStatus, CapturedFishNetPacket } from "@kar-mi/spirit-vale-tools-capture";
 import type { DesktopSettingsUpdate, DesktopState } from "../shared/contracts.ts";
+import { FishNetCaptureDecoder } from "./fishnet-capture-decoder.ts";
 import { MarketContributor, type ContributorSnapshot } from "./contributor.ts";
 import { errorMessage, isRecord, loadJson, writeJsonAtomic } from "./storage.ts";
 
@@ -13,9 +14,11 @@ interface DesktopSettings {
 
 const defaultSettings = (): DesktopSettings => ({ schemaVersion: 1, contributionEnabled: true, deviceName: null });
 const RECONNECT_WARNING = "Market requests are visible, but linked responses are unresolved. Restart Spirit Vale while ValeMarket is already capturing, then search again.";
+const FRAGMENT_DROP_WARNING = "Some fragmented game messages were incomplete. Select the network adapter carrying Spirit Vale traffic directly, then search again.";
 
 export class CaptureService {
   private readonly capture = new PacketCapture();
+  private readonly fishNetDecoder: FishNetCaptureDecoder;
   private readonly settingsPath: string;
   private readonly contributorPath: string;
   private settings: DesktopSettings = defaultSettings();
@@ -42,6 +45,8 @@ export class CaptureService {
   private warning?: string;
   private droppedFlows: DesktopState["droppedFlows"] = [];
   private running = false;
+  private fragmentedMessagesReassembled = 0;
+  private fragmentAssembliesDropped = 0;
   private reconcileChain: Promise<void> = Promise.resolve();
 
   constructor(
@@ -50,13 +55,19 @@ export class CaptureService {
   ) {
     this.settingsPath = path.join(dataDirectory, "settings.json");
     this.contributorPath = path.join(dataDirectory, "contributor-v2.json");
+    this.fishNetDecoder = new FishNetCaptureDecoder({
+      onPacket: (packet) => this.consume(packet),
+      onWarning: (message) => { this.warning = message; },
+      onFragmentReassembled: () => { this.fragmentedMessagesReassembled += 1; },
+      onFragmentDropped: () => { this.fragmentAssembliesDropped += 1; },
+    });
     this.capture.on("started", () => {
       this.running = true;
       this.phase = this.gameDetected ? "capturing" : "waiting-for-game";
       this.detail = this.gameDetected ? "Observing game traffic" : "Waiting for Spirit Vale";
     });
     this.capture.on("targetStatus", (status) => this.targetStatus(status));
-    this.capture.on("fishNetPacket", (packet) => this.consume(packet));
+    this.capture.on("liteNetPacket", (packet) => this.fishNetDecoder.consume(packet));
     this.capture.on("warning", (message) => { this.warning = message; });
     this.capture.on("droppedFlows", (flows) => {
       this.droppedFlows = flows.map((flow) => ({ ...flow }));
@@ -68,7 +79,10 @@ export class CaptureService {
       this.warning = error.message;
       this.contributor?.setEnabled(false);
     });
-    this.capture.on("stopped", () => { this.running = false; });
+    this.capture.on("stopped", () => {
+      this.running = false;
+      this.fishNetDecoder.reset();
+    });
   }
 
   async start(): Promise<void> {
@@ -88,7 +102,12 @@ export class CaptureService {
       && this.contributorState.unresolvedInboundRpcLinks > 0
       ? RECONNECT_WARNING
       : undefined;
-    const warning = this.contributorState.warning ?? sessionSetupWarning ?? this.warning;
+    const fragmentDropWarning = this.contributorState.searchRequestsDecoded > 0
+      && this.contributorState.listingEventsDecoded === 0
+      && this.fragmentAssembliesDropped > 0
+      ? FRAGMENT_DROP_WARNING
+      : undefined;
+    const warning = this.contributorState.warning ?? fragmentDropWarning ?? sessionSetupWarning ?? this.warning;
     return {
       version: this.version,
       contributionEnabled: this.settings.contributionEnabled,
@@ -107,6 +126,8 @@ export class CaptureService {
       normalizationErrors: this.contributorState.normalizationErrors,
       duplicatesSuppressed: this.contributorState.duplicatesSuppressed,
       unresolvedInboundRpcLinks: this.contributorState.unresolvedInboundRpcLinks,
+      fragmentedMessagesReassembled: this.fragmentedMessagesReassembled,
+      fragmentAssembliesDropped: this.fragmentAssembliesDropped,
       droppedFlows: this.droppedFlows.map((flow) => ({ ...flow })),
       observationsPrepared: this.contributorState.prepared,
       observationsUploaded: this.contributorState.uploaded,
@@ -187,7 +208,7 @@ export class CaptureService {
         protocols: ["udp"],
         targetProcessName: "SpiritVale.exe",
         ...(this.settings.deviceName === null ? {} : { deviceName: this.settings.deviceName }),
-        decodeFishNet: true,
+        decodeLiteNetLib: true,
       });
       this.running = true;
     } catch (error) {

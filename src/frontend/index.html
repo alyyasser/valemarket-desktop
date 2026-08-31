@@ -645,6 +645,8 @@ function renderCollector() {
     ? `${(desktopState.listingsDecoded ?? 0).toLocaleString()} listings decoded · ${(desktopState.observationsNormalized ?? 0).toLocaleString()} normalized · ${(desktopState.normalizationDropped ?? 0).toLocaleString()} dropped · ${(desktopState.duplicatesSuppressed ?? 0).toLocaleString()} duplicates`
       + ((desktopState.normalizationErrors ?? 0) > 0 ? ` · ${desktopState.normalizationErrors.toLocaleString()} errors` : "")
       + ((desktopState.unresolvedInboundRpcLinks ?? 0) > 0 ? ` · ${desktopState.unresolvedInboundRpcLinks.toLocaleString()} unresolved inbound links` : "")
+      + ((desktopState.fragmentedMessagesReassembled ?? 0) > 0 ? ` · ${desktopState.fragmentedMessagesReassembled.toLocaleString()} fragmented messages restored` : "")
+      + ((desktopState.fragmentAssembliesDropped ?? 0) > 0 ? ` · ${desktopState.fragmentAssembliesDropped.toLocaleString()} incomplete fragmented messages` : "")
       + (unattributedPackets > 0 ? ` · ${unattributedPackets.toLocaleString()} unattributed (${gameTrafficFlows} game-like flows)` : "")
     : "";
   $("collector-enabled").checked = desktopState?.contributionEnabled === true;
