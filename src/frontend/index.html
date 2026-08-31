@@ -186,6 +186,7 @@ header{
   gap:12px;align-items:baseline;font-family:var(--font-mono);font-variant-numeric:tabular-nums;
 }
 .vmeta .p{grid-column:2;color:var(--acc);font-size:15px;font-weight:650;white-space:nowrap}
+.vmeta .p small{color:var(--faint);font:700 9px var(--font-body);letter-spacing:.06em;text-transform:uppercase}
 .vmeta .s{grid-column:1;grid-row:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--faint);font-size:10.5px}
 .stats{
   grid-column:1/-1;grid-row:2;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
@@ -214,13 +215,11 @@ header{
 .depth h2{margin:0 0 8px;color:var(--ink-strong);font-size:12px}
 .depth h2 small{color:var(--faint);font-weight:400}
 .depth-level{
-  display:grid;grid-template-columns:78px minmax(0,1fr) auto;gap:8px;align-items:center;
-  padding:7px 0;border-bottom:1px solid var(--line);font-family:var(--font-mono);font-size:11.5px;
+  display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 16px;align-items:baseline;
+  padding:8px 0;border-bottom:1px solid var(--line);font-family:var(--font-mono);font-size:11.5px;
 }
 .depth-level:first-of-type .depth-price{color:var(--acc);font-weight:700}
-.depth-bar{height:5px;border-radius:99px;background:var(--line);overflow:hidden}
-.depth-bar i{display:block;height:100%;border-radius:inherit;background:#3f9368}
-.depth-count{color:var(--dim);white-space:nowrap}
+.depth-count{justify-self:end;color:var(--dim);white-space:nowrap;text-align:right}
 .depth-age{grid-column:1/-1;color:var(--faint);font-size:10px}
 .depth-totals{display:flex;gap:8px;padding-top:10px}
 .depth-total{flex:1;padding:7px 8px;border-radius:6px;background:var(--panel2)}
@@ -505,8 +504,40 @@ function quartileStrip(quartiles) {
 }
 
 function priceDepthOf(variants) {
-  const depths = variants.map((variant) => variant.depth).filter((depth) => depth?.levels?.length);
-  return depths.length === 1 ? depths[0] : null;
+  const provided = variants.map((variant) => variant.depth).filter((depth) => depth?.levels?.length);
+  if (provided.length === 1) return provided[0];
+  const byPrice = new Map();
+  for (const variant of variants) {
+    if (!Number.isFinite(variant.low)) continue;
+    const quantity = Number.isSafeInteger(variant.quantity) && variant.quantity >= 0 ? variant.quantity : 0;
+    const level = byPrice.get(variant.low) || {
+      price: variant.low,
+      listingCount: 0,
+      unitCount: 0,
+      firstSeenAt: variant.firstSeenAt,
+      lastSeenAt: variant.lastSeenAt,
+    };
+    level.listingCount += variant.listingCount;
+    level.unitCount += quantity;
+    if (variant.firstSeenAt && (!level.firstSeenAt || variant.firstSeenAt < level.firstSeenAt)) level.firstSeenAt = variant.firstSeenAt;
+    if (variant.lastSeenAt && (!level.lastSeenAt || variant.lastSeenAt > level.lastSeenAt)) level.lastSeenAt = variant.lastSeenAt;
+    byPrice.set(variant.low, level);
+  }
+  const levels = [...byPrice.values()].sort((left, right) => left.price - right.price);
+  if (!levels.length) return null;
+  const floor = levels[0].price;
+  const within = (percent) => levels
+    .filter((level) => level.price * 100 <= floor * (100 + percent))
+    .reduce((total, level) => ({
+      listingCount: total.listingCount + level.listingCount,
+      unitCount: total.unitCount + level.unitCount,
+    }), { listingCount: 0, unitCount: 0 });
+  return {
+    levels: levels.slice(0, 12),
+    totalLevels: levels.length,
+    withinFivePercent: within(5),
+    withinTenPercent: within(10),
+  };
 }
 
 function freshRow(level, maximumUnits, old) {
@@ -545,17 +576,17 @@ function depthDetails(depth) {
     return `<div class="depth"><h2>Price depth <small>not available in this snapshot</small></h2></div>`;
   }
   if (depth.recent) return recentSupplyDetails(depth);
-  const maximumUnits = Math.max(...depth.levels.map((level) => level.unitCount));
   const unitText = (count) => `${count} unit${count === 1 ? "" : "s"}`;
   const listingText = (count) => `${count} listing${count === 1 ? "" : "s"}`;
-  return `<div class="depth"><h2>Buy-side depth <small>observed active listings</small></h2>`
-    + depth.levels.map((level) => {
-      const width = Math.max(4, Math.round(level.unitCount / maximumUnits * 100));
-      return `<div class="depth-level"><b class="depth-price" title="${money(level.price)}">${moneyShort(level.price)}</b>`
-        + `<span class="depth-bar"><i style="width:${width}%"></i></span>`
+  const depthScope = depth.totalLevels > depth.levels.length
+    ? `${depth.levels.length} cheapest of ${depth.totalLevels} levels`
+    : "observed active listings";
+  return `<div class="depth"><h2>Unit-price depth <small>${depthScope}</small></h2>`
+    + depth.levels.map((level) =>
+      `<div class="depth-level"><b class="depth-price" title="${money(level.price)}">${moneyShort(level.price)}</b>`
         + `<span class="depth-count">${listingText(level.listingCount)} · ${unitText(level.unitCount)}</span>`
-        + `<small class="depth-age">oldest listing ${ageHTML(level.firstSeenAt)} · newest listing ${ageHTML(level.lastSeenAt)}</small></div>`;
-    }).join("")
+        + `<small class="depth-age">oldest listing ${ageHTML(level.firstSeenAt)} · newest listing ${ageHTML(level.lastSeenAt)}</small></div>`
+    ).join("")
     + `<div class="depth-totals"><span class="depth-total"><i>At low</i><b>${unitText(depth.levels[0].unitCount)}</b></span>`
     + `<span class="depth-total"><i>Within 5%</i><b>${unitText(depth.withinFivePercent.unitCount)}</b></span>`
     + `<span class="depth-total"><i>Within 10%</i><b>${unitText(depth.withinTenPercent.unitCount)}</b></span></div></div>`;
@@ -867,11 +898,15 @@ function viewOf(item) {
   let lastSeenAt = "";
   let firstSeenAt = "";
   let confirmed = false;
+  let units = 0;
   const mids = [];
   for (const variant of variants) {
     if (variant.low < low) low = variant.low;
     if (variant.high > high) high = variant.high;
     listings += variant.listingCount;
+    units += Number.isSafeInteger(variant.quantity) && variant.quantity >= 0
+      ? variant.quantity
+      : variant.listingCount;
     if (!lastSeenAt || variant.lastSeenAt > lastSeenAt) lastSeenAt = variant.lastSeenAt;
     if (variant.firstSeenAt && (!firstSeenAt || variant.firstSeenAt < firstSeenAt)) firstSeenAt = variant.firstSeenAt;
     if (variant.published) confirmed = true;
@@ -883,6 +918,7 @@ function viewOf(item) {
     high,
     median: mids[Math.floor((mids.length - 1) / 2)],
     listingCount: listings,
+    unitCount: units,
     variantCount: variants.length,
     lastSeenAt,
     firstSeenAt: firstSeenAt || lastSeenAt,
@@ -1137,14 +1173,16 @@ function renderList() {
     const target = view.quartiles?.p25 ?? view.median;
     const p75 = view.quartiles?.p75 ?? view.high;
     const price = item.fungible
-      ? `<span class="hi"><span class="price-label">P25 · buy target</span>${money(target)}</span>`
+      ? `<span class="hi"><span class="price-label">P25 · unit</span>${money(target)}</span>`
         + `<span class="lo">low ${money(view.low)} · P75 ${money(p75)}</span>`
       : `<span class="hi">${money(view.low)} – ${money(view.high)}</span><span class="lo">${view.variantCount} roll${view.variantCount === 1 ? "" : "s"}</span>`;
     const mark = view.confirmed
       ? `<span class="ok">confirmed</span>`
       : (unique && view.listingCount === 1 ? `<span class="mark">one listing</span>` : `<span class="mark">unconfirmed</span>`);
     const piece = item.slot ? ` · ${slotLabel(item.slot)}` : "";
-    const count = item.fungible ? `${view.listingCount} listings` : `${view.listingCount} seen`;
+    const count = item.fungible
+      ? `${view.listingCount} listings · ${view.unitCount.toLocaleString()} units`
+      : `${view.listingCount} seen`;
     return `
       <button type="button" class="row${state.open === item.id ? " on" : ""}" data-id="${escapeHtml(item.id)}">
         <div class="ic">${iconHTML(item)}</div>
@@ -1178,7 +1216,7 @@ function renderInspector() {
   const summary = !view
     ? "No rolls match these filters."
     : item.fungible
-    ? `P25 <b title="${money(view.quartiles?.p25 ?? view.median)}">${moneyShort(view.quartiles?.p25 ?? view.median)}</b> · low ${moneyShort(view.low)} · P75 ${moneyShort(view.quartiles?.p75 ?? view.high)} · ${view.listingCount} listings`
+    ? `Unit P25 <b title="${money(view.quartiles?.p25 ?? view.median)}">${moneyShort(view.quartiles?.p25 ?? view.median)}</b> · low ${moneyShort(view.low)} · P75 ${moneyShort(view.quartiles?.p75 ?? view.high)} · ${view.listingCount} listings · ${view.unitCount.toLocaleString()} units`
     : `<b>${view.variantCount}</b> of ${item.variantCount} rolls · ${money(view.low)} – ${money(view.high)}`;
 
   let body = "";
@@ -1235,12 +1273,14 @@ function renderInspector() {
 function variantRow(variant) {
   const slot = variant.artifactSlot == null ? "" : ART_SLOTS[variant.artifactSlot] || "slot " + variant.artifactSlot;
   const unique = variant.listingCount === 1;
+  const stacked = Number.isSafeInteger(variant.quantity) && variant.quantity > 1;
   const price = unique || variant.low === variant.high
     ? money(variant.low)
     : `${money(variant.low)} – ${money(variant.high)}`;
   const mark = variant.published
     ? "confirmed"
     : unique ? "one listing" : `${variant.listingCount} listings`;
+  const stack = stacked ? ` · stack ×${variant.quantity.toLocaleString()}` : "";
   const statRows = variant.stats || [];
   const stats = statRows.length ? statRows.map(formatStat).join("") : "";
   const enhancements = enhancementHTML(variant.enhancements);
@@ -1255,7 +1295,7 @@ function variantRow(variant) {
   const expiry = expiryHTML(variant.expiresAt);
   return `<div class="vrow">
     ${details || enhancements ? `<div class="stats${statRows.length === 1 ? " single-stat" : ""}">${details}${enhancements}</div>` : ""}
-    <div class="vmeta"><span class="p">${price}</span><span class="s">${mark} · ${span}${expiry ? ` · ${expiry}` : ""}</span></div>
+    <div class="vmeta"><span class="p">${price}${stacked ? " <small>each</small>" : ""}</span><span class="s">${mark}${stack} · ${span}${expiry ? ` · ${expiry}` : ""}</span></div>
   </div>`;
 }
 
