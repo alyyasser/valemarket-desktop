@@ -12,6 +12,7 @@ interface DesktopSettings {
 }
 
 const defaultSettings = (): DesktopSettings => ({ schemaVersion: 1, contributionEnabled: true, deviceName: null });
+const RECONNECT_WARNING = "Market requests are visible, but linked responses are unresolved. Restart Spirit Vale while ValeMarket is already capturing, then search again.";
 
 export class CaptureService {
   private readonly capture = new PacketCapture();
@@ -24,12 +25,14 @@ export class CaptureService {
     uploaded: 0,
     queuedBatches: 0,
     marketEventsDecoded: 0,
+    searchRequestsDecoded: 0,
     listingEventsDecoded: 0,
     listingsDecoded: 0,
     observationsNormalized: 0,
     normalizationDropped: 0,
     normalizationErrors: 0,
     duplicatesSuppressed: 0,
+    unresolvedInboundRpcLinks: 0,
   };
   private npcap: DesktopState["npcap"] = { availability: "error", detail: "Checking Npcap…" };
   private gameDetected = false;
@@ -80,6 +83,12 @@ export class CaptureService {
   }
 
   state(): DesktopState {
+    const sessionSetupWarning = this.contributorState.searchRequestsDecoded > 0
+      && this.contributorState.listingEventsDecoded === 0
+      && this.contributorState.unresolvedInboundRpcLinks > 0
+      ? RECONNECT_WARNING
+      : undefined;
+    const warning = this.contributorState.warning ?? sessionSetupWarning ?? this.warning;
     return {
       version: this.version,
       contributionEnabled: this.settings.contributionEnabled,
@@ -90,21 +99,21 @@ export class CaptureService {
       gameDetected: this.gameDetected,
       packetsObserved: this.packetsObserved,
       marketEventsDecoded: this.contributorState.marketEventsDecoded,
+      searchRequestsDecoded: this.contributorState.searchRequestsDecoded,
       listingEventsDecoded: this.contributorState.listingEventsDecoded,
       listingsDecoded: this.contributorState.listingsDecoded,
       observationsNormalized: this.contributorState.observationsNormalized,
       normalizationDropped: this.contributorState.normalizationDropped,
       normalizationErrors: this.contributorState.normalizationErrors,
       duplicatesSuppressed: this.contributorState.duplicatesSuppressed,
+      unresolvedInboundRpcLinks: this.contributorState.unresolvedInboundRpcLinks,
       droppedFlows: this.droppedFlows.map((flow) => ({ ...flow })),
       observationsPrepared: this.contributorState.prepared,
       observationsUploaded: this.contributorState.uploaded,
       queuedBatches: this.contributorState.queuedBatches,
       ...(this.contributorState.latestObservationAt === undefined ? {} : { latestObservationAt: this.contributorState.latestObservationAt }),
       ...(this.contributorState.latestUploadAt === undefined ? {} : { latestUploadAt: this.contributorState.latestUploadAt }),
-      ...((this.contributorState.warning ?? this.warning) === undefined
-        ? {}
-        : { warning: this.contributorState.warning ?? this.warning! }),
+      ...(warning === undefined ? {} : { warning }),
     };
   }
 

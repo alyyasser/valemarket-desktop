@@ -39,12 +39,14 @@ export interface ContributorSnapshot {
   uploaded: number;
   queuedBatches: number;
   marketEventsDecoded: number;
+  searchRequestsDecoded: number;
   listingEventsDecoded: number;
   listingsDecoded: number;
   observationsNormalized: number;
   normalizationDropped: number;
   normalizationErrors: number;
   duplicatesSuppressed: number;
+  unresolvedInboundRpcLinks: number;
   latestObservationAt?: string;
   latestUploadAt?: string;
   warning?: string;
@@ -88,12 +90,14 @@ export class MarketContributor {
       uploaded: 0,
       queuedBatches: state.outbox.length,
       marketEventsDecoded: 0,
+      searchRequestsDecoded: 0,
       listingEventsDecoded: 0,
       listingsDecoded: 0,
       observationsNormalized: 0,
       normalizationDropped: 0,
       normalizationErrors: 0,
       duplicatesSuppressed: 0,
+      unresolvedInboundRpcLinks: 0,
     };
   }
 
@@ -123,6 +127,10 @@ export class MarketContributor {
 
   consume(packet: CapturedFishNetPacket): void {
     if (!this.enabled || this.stopped) return;
+    const unresolvedInboundRpcLink = packet.packetName === "rpcLink"
+      && packet.linkResolved === false
+      && packet.liteNetPacket.udpPacket.direction === "inbound";
+    if (unresolvedInboundRpcLink) this.metrics.unresolvedInboundRpcLinks += 1;
     let events;
     try {
       events = this.tracker.consume(packet);
@@ -130,7 +138,10 @@ export class MarketContributor {
       this.warn(`Could not decode a verified market packet: ${errorMessage(error)}`);
       return;
     }
-    if (events.length === 0) return;
+    if (events.length === 0) {
+      if (unresolvedInboundRpcLink) this.publish();
+      return;
+    }
     const decoded = events.map((event) => {
       let listingCount: number | undefined;
       if (event.kind === "searchPage") listingCount = event.page.listings.length;
@@ -141,6 +152,7 @@ export class MarketContributor {
     });
     this.metrics.marketEventsDecoded += decoded.length;
     for (const result of decoded) {
+      if (result.event.kind === "searchRequest") this.metrics.searchRequestsDecoded += 1;
       if (result.listingCount === undefined) continue;
       this.metrics.listingEventsDecoded += 1;
       this.metrics.listingsDecoded += result.listingCount;

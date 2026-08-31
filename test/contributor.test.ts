@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { CapturedFishNetPacket } from "@kar-mi/spirit-vale-tools-capture";
 import type { FishNetMarketEvent, FishNetMarketListing } from "@kar-mi/spirit-vale-tools-market";
-import { MarketContributor } from "../src/backend/contributor.ts";
+import { MarketContributor, type ContributorSnapshot } from "../src/backend/contributor.ts";
 import { CaptureService } from "../src/backend/capture-service.ts";
 import { canonicalObservationPayload, sha256Hex, type MarketObservationBatch } from "../src/backend/market-contracts.ts";
 import { normalizeListing } from "../src/backend/normalizer.ts";
@@ -202,6 +202,52 @@ describe("market upload contract", () => {
     });
   });
 
+  test("diagnoses capture started after inbound RPC links were registered", async () => {
+    const contributor = await MarketContributor.load({
+      statePath: await createStatePath(),
+      collectorVersion: "test-collector",
+    });
+    contributor.setEnabled(true);
+    trackerOf(contributor).consume = (packet) => packet.packetName === "serverRpc"
+      ? [{
+          kind: "searchRequest",
+          tick: 1,
+          request: { query: null, cursor: null, pageSize: 20 },
+        }]
+      : [];
+
+    contributor.consume({
+      packetName: "rpcLink",
+      linkResolved: false,
+      liteNetPacket: { udpPacket: { direction: "inbound" } },
+    } as CapturedFishNetPacket);
+    contributor.consume({ packetName: "serverRpc" } as CapturedFishNetPacket);
+
+    expect(contributor.snapshot()).toMatchObject({
+      marketEventsDecoded: 1,
+      searchRequestsDecoded: 1,
+      listingEventsDecoded: 0,
+      unresolvedInboundRpcLinks: 1,
+    });
+
+    const service = new CaptureService("unused", "0.1.4");
+    Object.assign(contributorStateOf(service), contributor.snapshot());
+    expect(service.state().warning).toBe(
+      "Market requests are visible, but linked responses are unresolved. Restart Spirit Vale while ValeMarket is already capturing, then search again.",
+    );
+
+    trackerOf(contributor).consume = () => [searchEvent(2)];
+    contributor.consume({ packetName: "targetRpc" } as CapturedFishNetPacket);
+    Object.assign(contributorStateOf(service), contributor.snapshot());
+    const recoveredState = service.state();
+    expect(recoveredState).toMatchObject({
+      listingEventsDecoded: 1,
+      listingsDecoded: 1,
+    });
+    expect(recoveredState.warning).toBeUndefined();
+    await contributor.shutdown();
+  });
+
   test("surfaces dropped-flow verdicts in desktop state", () => {
     const service = new CaptureService("unused", "0.1.3");
     captureOf(service).emit("droppedFlows", [
@@ -229,10 +275,19 @@ interface CaptureServiceInternals {
       flows: Array<{ flow: string; packets: number; verdict: "game traffic" | "unrelated" | "unknown" }>,
     ): boolean;
   };
+  contributorState: ContributorSnapshot;
 }
 
 function captureOf(service: CaptureService): CaptureServiceInternals["capture"] {
-  return (service as unknown as CaptureServiceInternals).capture;
+  // Tests intentionally access the owned capture emitter without starting Npcap.
+  const internals = service as unknown as CaptureServiceInternals;
+  return internals.capture;
+}
+
+function contributorStateOf(service: CaptureService): ContributorSnapshot {
+  // Tests inject an observed contributor snapshot without starting the desktop service.
+  const internals = service as unknown as CaptureServiceInternals;
+  return internals.contributorState;
 }
 
 function searchEvent(sequence: number): FishNetMarketEvent {

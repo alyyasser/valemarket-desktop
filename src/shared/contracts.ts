@@ -76,12 +76,14 @@ export interface DesktopState {
   gameDetected: boolean;
   packetsObserved: number;
   marketEventsDecoded: number;
+  searchRequestsDecoded: number;
   listingEventsDecoded: number;
   listingsDecoded: number;
   observationsNormalized: number;
   normalizationDropped: number;
   normalizationErrors: number;
   duplicatesSuppressed: number;
+  unresolvedInboundRpcLinks: number;
   droppedFlows: Array<{
     flow: string;
     packets: number;
