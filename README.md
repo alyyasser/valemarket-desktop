@@ -45,6 +45,8 @@ The displayed timestamp comes from the API snapshot. Expired listings are filter
 Contribution is enabled by default. Open **Contributor** in the header to turn it off or select a capture adapter.
 
 When Npcap is available, ValeMarket observes Spirit Vale market traffic locally and uploads normalized listing observations to the community API. New contributors are eligible immediately; a single eligible contributor is sufficient for the launch policy.
+
+Start ValeMarket before launching Spirit Vale so capture observes the session's RPC-link setup. If the Contributor panel reports unresolved linked responses, keep ValeMarket capturing, fully exit and relaunch Spirit Vale, then run the market search again.
 Uploads include the listing price, quantity, status, displayed stats, and visible refine, potential, card, gem, and gem-refine metadata.
 
 ValeMarket does **not** upload:
