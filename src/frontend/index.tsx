@@ -1,7 +1,6 @@
 import { render } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import itemIconCatalog from "./item-icons.json";
-import { init, os } from "@neutralinojs/lib";
 import {
   DESKTOP_API_PORT,
   MARKET_API_URL,
@@ -14,10 +13,17 @@ import {
   type MarketStat,
 } from "../shared/contracts.ts";
 
+declare global {
+  interface Window {
+    valeMarketDesktop?: {
+      openDiagnostics(path: string): Promise<void>;
+    };
+  }
+}
+
 const desktopApi = `http://127.0.0.1:${DESKTOP_API_PORT}`;
 const formatter = new Intl.NumberFormat("en-US");
 
-try { init(); } catch {}
 
 function App() {
   const [listings, setListings] = useState<MarketListing[]>([]);
@@ -505,7 +511,7 @@ function errorMessage(error: unknown): string {
 }
 
 function openExternal(url: string): void {
-  void os.open(url).catch(() => window.open(url, "_blank", "noopener"));
+  window.open(url, "_blank", "noopener");
 }
 
 render(<App />, document.getElementById("app")!);

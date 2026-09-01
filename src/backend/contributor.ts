@@ -8,6 +8,7 @@ import {
   type MarketUploadObservation,
 } from "./market-contracts.ts";
 import { normalizeMarketEvent } from "./normalizer.ts";
+import { errorLogFields, type AppLogger, type LogFields } from "./logger.ts";
 import { errorMessage, isRecord, loadJson, writeJsonAtomic } from "./storage.ts";
 
 const FLUSH_OBSERVATIONS = 50;
@@ -59,6 +60,7 @@ export interface MarketContributorOptions {
   fetch?: typeof fetch;
   now?: () => Date;
   onState?: (state: ContributorSnapshot) => void;
+  logger?: AppLogger;
 }
 
 export class MarketContributor {
@@ -102,7 +104,9 @@ export class MarketContributor {
   }
 
   static async load(options: MarketContributorOptions): Promise<MarketContributor> {
-    const state = await loadJson(options.statePath, emptyState, parseState);
+    const state = await loadJson(options.statePath, emptyState, parseState, (error) => {
+      options.logger?.warn("state.load.invalid", { state: "contributor", ...errorLogFields(error) });
+    });
     return new MarketContributor(options, state);
   }
 
@@ -113,6 +117,7 @@ export class MarketContributor {
   setEnabled(enabled: boolean): void {
     if (this.stopped || this.enabled === enabled) return;
     this.enabled = enabled;
+    this.options.logger?.info("contributor.enabled.changed", { enabled });
     if (!enabled) {
       clearTimeout(this.flushTimer);
       clearTimeout(this.uploadTimer);
@@ -135,7 +140,7 @@ export class MarketContributor {
     try {
       events = this.tracker.consume(packet);
     } catch (error) {
-      this.warn(`Could not decode a verified market packet: ${errorMessage(error)}`);
+      this.warn(`Could not decode a verified market packet: ${errorMessage(error)}`, errorLogFields(error));
       return;
     }
     if (events.length === 0) {
@@ -186,6 +191,10 @@ export class MarketContributor {
   }
 
   async shutdown(): Promise<void> {
+    this.options.logger?.info("contributor.shutdown.started", {
+      pendingObservations: this.pending.size,
+      queuedBatches: this.state.outbox.length,
+    });
     clearTimeout(this.flushTimer);
     clearTimeout(this.uploadTimer);
     this.flushTimer = undefined;
@@ -194,6 +203,7 @@ export class MarketContributor {
     if (this.enabled && this.pending.size > 0) await this.flushPending();
     this.stopped = true;
     await this.persist();
+    this.options.logger?.info("contributor.shutdown.completed", { queuedBatches: this.state.outbox.length });
   }
 
   private addObservation(observation: MarketUploadObservation): void {
@@ -239,7 +249,9 @@ export class MarketContributor {
   }
 
   private enqueue(operation: () => Promise<void>): void {
-    this.operations = this.operations.then(operation).catch((error) => this.warn(errorMessage(error)));
+    this.operations = this.operations.then(operation).catch((error) => {
+      this.warn(errorMessage(error), errorLogFields(error));
+    });
   }
 
   private async flushPending(): Promise<void> {
@@ -262,6 +274,10 @@ export class MarketContributor {
       }
       const batch = this.createBatch(observations);
       this.state.outbox.push({ batch, attempts: 0, nextAttemptAt: this.now().toISOString() });
+      this.options.logger?.info("contributor.batch.queued", {
+        observations: batch.observations.length,
+        queuedBatches: this.state.outbox.length,
+      });
       for (const key of selectedKeys) this.pending.delete(key);
     }
     this.state.recentKeys = [...this.recentOrder];
@@ -308,13 +324,17 @@ export class MarketContributor {
           this.state.outbox.shift();
           await this.persist();
           this.publish();
+          this.options.logger?.info("contributor.upload.succeeded", {
+            observations: entry.batch.observations.length,
+            queuedBatches: this.state.outbox.length,
+          });
           continue;
         }
         if (response.status === 401) delete this.state.installationToken;
         const retryAfter = retryAfterMs(response.headers.get("retry-after"), this.now());
         await this.deferEntry(entry, `Market upload returned HTTP ${response.status}`, retryAfter);
       } catch (error) {
-        await this.deferEntry(entry, `Market upload failed: ${errorMessage(error)}`);
+        await this.deferEntry(entry, `Market upload failed: ${errorMessage(error)}`, undefined, error);
       }
       return;
     }
@@ -334,16 +354,21 @@ export class MarketContributor {
     }
     this.state.installationToken = body.token;
     await this.persist();
+    this.options.logger?.info("contributor.registration.succeeded");
     return body.token;
   }
 
-  private async deferEntry(entry: StoredBatch, message: string, serverDelay?: number): Promise<void> {
+  private async deferEntry(entry: StoredBatch, message: string, serverDelay?: number, error?: unknown): Promise<void> {
     entry.attempts += 1;
     entry.lastError = message;
     const delay = serverDelay ?? Math.min(MAX_RETRY_MS, 1_000 * (2 ** Math.min(entry.attempts - 1, 8)));
     entry.nextAttemptAt = new Date(this.now().getTime() + delay).toISOString();
     await this.persist();
-    this.warn(message);
+    this.warn(message, {
+      attempt: entry.attempts,
+      delayMs: delay,
+      ...(error === undefined ? {} : errorLogFields(error)),
+    });
     this.scheduleUpload(delay);
   }
 
@@ -351,8 +376,9 @@ export class MarketContributor {
     await writeJsonAtomic(this.options.statePath, this.state);
   }
 
-  private warn(message: string): void {
+  private warn(message: string, fields: LogFields = {}): void {
     this.metrics.warning = message;
+    this.options.logger?.warn("contributor.warning", { message, ...fields });
     this.publish();
   }
 

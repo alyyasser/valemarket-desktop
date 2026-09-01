@@ -1,12 +1,18 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-export async function loadJson<T>(file: string, fallback: () => T, parse: (value: unknown) => T): Promise<T> {
+export async function loadJson<T>(
+  file: string,
+  fallback: () => T,
+  parse: (value: unknown) => T,
+  onInvalid?: (error: unknown) => void,
+): Promise<T> {
   try {
     return parse(JSON.parse(await readFile(file, "utf8")) as unknown);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      console.warn(`[valemarket] ignored invalid state at ${file}: ${errorMessage(error)}`);
+      if (onInvalid === undefined) console.warn(`[valemarket] ignored invalid state at ${file}: ${errorMessage(error)}`);
+      else onInvalid(error);
     }
     return fallback();
   }

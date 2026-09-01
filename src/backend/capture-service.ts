@@ -5,6 +5,7 @@ import type { DesktopSettingsUpdate, DesktopState } from "../shared/contracts.ts
 import { FishNetCaptureDecoder } from "./fishnet-capture-decoder.ts";
 import { MarketContributor, type ContributorSnapshot } from "./contributor.ts";
 import { errorMessage, isRecord, loadJson, writeJsonAtomic } from "./storage.ts";
+import { errorLogFields, type AppLogger } from "./logger.ts";
 
 interface DesktopSettings {
   schemaVersion: 1;
@@ -58,25 +59,41 @@ export class CaptureService {
   constructor(
     private readonly dataDirectory: string,
     private readonly version: string,
+    private readonly logger?: AppLogger,
   ) {
     this.settingsPath = path.join(dataDirectory, "settings.json");
     this.contributorPath = path.join(dataDirectory, "contributor-v2.json");
     this.fishNetDecoder = new FishNetCaptureDecoder({
       onPacket: (packet) => this.consume(packet),
-      onWarning: (message) => { this.warning = message; },
+      onWarning: (message) => {
+        this.warning = message;
+        this.logger?.warn("capture.decode.warning", { message });
+      },
       onFragmentReassembled: () => { this.fragmentedMessagesReassembled += 1; },
-      onFragmentDropped: () => { this.fragmentAssembliesDropped += 1; },
+      onFragmentDropped: () => {
+        this.fragmentAssembliesDropped += 1;
+        this.logger?.warn("capture.fragment.dropped", { dropped: this.fragmentAssembliesDropped });
+      },
     });
     this.capture.on("started", () => {
       this.running = true;
       this.phase = this.gameDetected ? "capturing" : "waiting-for-game";
       this.detail = this.gameDetected ? "Observing game traffic" : "Waiting for Spirit Vale";
+      this.logger?.info("capture.started", { gameDetected: this.gameDetected });
     });
     this.capture.on("targetStatus", (status) => this.targetStatus(status));
     this.capture.on("liteNetPacket", (packet) => this.fishNetDecoder.consume(packet));
-    this.capture.on("warning", (message) => { this.warning = message; });
+    this.capture.on("warning", (message) => {
+      this.warning = message;
+      this.logger?.warn("capture.warning", { message });
+    });
     this.capture.on("droppedFlows", (flows) => {
       this.droppedFlows = flows.map((flow) => ({ ...flow }));
+      this.logger?.warn("capture.flows.dropped", {
+        flows: flows.length,
+        packets: flows.reduce((total, flow) => total + flow.packets, 0),
+        gameTrafficFlows: flows.filter((flow) => flow.verdict === "game traffic").length,
+      });
     });
     this.capture.on("error", (error) => {
       this.running = false;
@@ -84,19 +101,24 @@ export class CaptureService {
       this.detail = "Packet capture stopped";
       this.warning = error.message;
       this.contributor?.setEnabled(false);
+      this.logger?.error("capture.failed", errorLogFields(error));
     });
     this.capture.on("stopped", () => {
       this.running = false;
       this.fishNetDecoder.reset();
+      this.logger?.info("capture.stopped");
     });
   }
 
   async start(): Promise<void> {
-    this.settings = await loadJson(this.settingsPath, defaultSettings, parseSettings);
+    this.settings = await loadJson(this.settingsPath, defaultSettings, parseSettings, (error) => {
+      this.logger?.warn("state.load.invalid", { state: "settings", ...errorLogFields(error) });
+    });
     this.contributor = await MarketContributor.load({
       statePath: this.contributorPath,
       collectorVersion: this.version,
       onState: (state) => { this.contributorState = state; },
+      ...(this.logger === undefined ? {} : { logger: this.logger }),
     });
     await this.refreshNpcap();
     await this.reconcile();
@@ -158,6 +180,10 @@ export class CaptureService {
   async updateSettings(update: DesktopSettingsUpdate): Promise<DesktopState> {
     if (update.contributionEnabled !== undefined) this.settings.contributionEnabled = update.contributionEnabled;
     if (update.deviceName !== undefined) this.settings.deviceName = update.deviceName;
+    this.logger?.info("settings.updated", {
+      ...(update.contributionEnabled === undefined ? {} : { contributionEnabled: update.contributionEnabled }),
+      ...(update.deviceName === undefined ? {} : { captureDevice: update.deviceName === null ? "automatic" : "configured" }),
+    });
     await writeJsonAtomic(this.settingsPath, this.settings);
     await this.refreshNpcap();
     await this.reconcile();
@@ -165,17 +191,25 @@ export class CaptureService {
   }
 
   async restart(): Promise<DesktopState> {
+    this.logger?.info("capture.restart.requested");
     await this.refreshNpcap();
     if (this.running) await this.capture.stop();
     this.running = false;
     await this.reconcile();
+    this.logger?.info("capture.restart.completed");
     return this.state();
   }
 
   async shutdown(): Promise<void> {
-    if (this.running) await this.capture.stop().catch(() => {});
+    this.logger?.info("capture.shutdown.started");
+    if (this.running) {
+      await this.capture.stop().catch((error) => {
+        this.logger?.error("capture.shutdown.stop_failed", errorLogFields(error));
+      });
+    }
     this.contributor?.setEnabled(false);
     await this.contributor?.shutdown();
+    this.logger?.info("capture.shutdown.completed");
   }
 
   private async refreshNpcap(): Promise<void> {
@@ -186,13 +220,22 @@ export class CaptureService {
         detail: status.detail,
         ...(status.version === undefined ? {} : { version: status.version }),
       };
+      this.logger?.info("npcap.status", {
+        availability: status.availability,
+        ...(status.version === undefined ? {} : { version: status.version }),
+      });
     } catch (error) {
       this.npcap = { availability: "error", detail: errorMessage(error) };
+      this.logger?.warn("npcap.status.failed", errorLogFields(error));
     }
   }
 
   private reconcile(): Promise<void> {
-    this.reconcileChain = this.reconcileChain.catch(() => {}).then(() => this.applyDesiredState());
+    this.reconcileChain = this.reconcileChain
+      .catch((error) => {
+        this.logger?.error("capture.reconcile.failed", errorLogFields(error));
+      })
+      .then(() => this.applyDesiredState());
     return this.reconcileChain;
   }
 
@@ -214,6 +257,7 @@ export class CaptureService {
     this.contributor?.setEnabled(true);
     this.phase = "waiting-for-game";
     this.detail = "Starting packet capture…";
+    this.logger?.info("capture.start.requested", { automaticDevice: this.settings.deviceName === null });
     try {
       this.droppedFlows = [];
       await this.capture.start({
@@ -223,24 +267,33 @@ export class CaptureService {
         decodeLiteNetLib: true,
       });
       this.running = true;
+      this.logger?.info("capture.start.completed");
     } catch (error) {
       this.contributor?.setEnabled(false);
       this.phase = "error";
       this.detail = "Could not start packet capture";
       this.warning = errorMessage(error);
+      this.logger?.error("capture.start.failed", errorLogFields(error));
     }
   }
 
   private async stopCapture(): Promise<void> {
     this.contributor?.setEnabled(false);
     if (!this.running && this.capture.state === "stopped") return;
-    await this.capture.stop().catch((error) => { this.warning = errorMessage(error); });
+    await this.capture.stop().catch((error) => {
+      this.warning = errorMessage(error);
+      this.logger?.error("capture.stop.failed", errorLogFields(error));
+    });
     this.running = false;
     this.gameDetected = false;
   }
 
   private targetStatus(status: CaptureTargetStatus): void {
+    const wasDetected = this.gameDetected;
     this.gameDetected = status.state === "active";
+    if (wasDetected !== this.gameDetected) {
+      this.logger?.info("capture.target.changed", { state: status.state });
+    }
     if (!this.running) return;
     this.phase = this.gameDetected ? "capturing" : "waiting-for-game";
     this.detail = this.gameDetected ? "Observing game traffic" : "Waiting for Spirit Vale";

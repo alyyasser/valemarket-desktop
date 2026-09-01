@@ -23,9 +23,9 @@ ValeMarket shows currently active listings reported by contributors. It is not a
 
 1. Download `ValeMarket-Desktop-v<version>-windows-x64.zip` from the latest release.
 2. Extract the entire archive to a folder you can keep.
-3. Run `valemarket-desktop-win_x64.exe` from that folder.
+3. Run `ValeMarket Desktop.exe` from that folder.
 
-Keep the executable, `resources.neu`, `neutralino.config.json`, and `extensions` directory together. ValeMarket stores its settings and contributor identity in the extracted folder.
+Keep the extracted folder together. ValeMarket stores its settings, logs, and contributor identity in its `data` directory.
 
 The initial build is unsigned, so Windows may show an unknown-publisher warning. Verify that the download came from this repository and compare its SHA-256 checksum with the release notes.
 
@@ -60,9 +60,17 @@ ValeMarket does **not** upload:
 
 If another tool already contributes to ValeMarket, enable contribution in only one application.
 
+## Local diagnostics
+
+ValeMarket writes structured JSON Lines logs to `data/logs` in the extracted portable build. A non-portable development build uses `%LOCALAPPDATA%/ValeMarket Desktop/logs`. Records cover application, Npcap, capture, decoding, persistence, and contributor upload lifecycle events. Raw packets, installation tokens, listing payloads, and seller or buyer data are redacted.
+
+Logs rotate at 2 MiB. ValeMarket retains at most 20 files and 20 MiB for 14 days. Open **Contributor** and select **Export diagnostics** to create a support folder containing the current session logs, a privacy-safe desktop state snapshot, and a manifest. The five newest diagnostic exports are retained under `data/diagnostics` (or the non-portable application data directory).
+
+Electron shell startup, renderer crashes, and Bun backend lifecycle events use the same structured log directory.
+
 ## Development
 
-The app uses [Neutralinojs](https://neutralino.js.org/) for the desktop shell, [Bun](https://bun.sh/) for the local backend, and Npcap for process-scoped packet capture.
+The app uses [Electron](https://www.electronjs.org/) for the desktop shell, [Bun](https://bun.sh/) for the local backend, and Npcap for process-scoped packet capture.
 
 ### Prerequisites
 
@@ -98,6 +106,7 @@ bun run package   Build the Windows release archive
 
 ```text
 src/backend/      Npcap lifecycle, local API, and contribution pipeline
+src/electron/     Electron main process and restricted preload bridge
 src/frontend/     Market browser and contributor controls
 src/shared/       Shared desktop contracts
 assets/           Local catalog, fonts, icons, and application artwork

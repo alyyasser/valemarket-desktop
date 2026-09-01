@@ -1,8 +1,9 @@
 {
   "name": "valemarket-npcap",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "description": "Windows desktop market browser and passive community contributor for Spirit Vale",
+  "author": "ValeMarket",
   "repository": {
     "type": "git",
     "url": "https://github.com/bjb2/valemarket-desktop.git"
@@ -12,12 +13,13 @@
     "url": "https://github.com/bjb2/valemarket-desktop/issues"
   },
   "type": "module",
+  "main": ".electron/main.cjs",
   "scripts": {
-    "setup": "bun install && neu update",
+    "setup": "bun install",
     "prepare": "bun run src/build.ts",
-    "dev": "bun run prepare && neu build && neu run",
-    "build": "bun run prepare && neu build",
-    "package": "bun run prepare && neu build --clean --release && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1",
+    "dev": "bun run prepare && electron .",
+    "build": "bun run prepare",
+    "package": "bun run prepare && electron-builder --win zip --x64 --publish never",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "check": "bun run typecheck && bun test"
@@ -25,13 +27,52 @@
   "dependencies": {
     "@kar-mi/spirit-vale-tools-capture": "2.7.0",
     "@kar-mi/spirit-vale-tools-market": "2.0.0",
-    "@neutralinojs/lib": "6.9.0",
     "preact": "10.29.7"
   },
   "devDependencies": {
-    "@neutralinojs/neu": "11.7.2",
     "@types/bun": "1.4.0",
+    "electron": "^44.1.0",
+    "electron-builder": "^26.15.3",
     "typescript": "7.0.2"
+  },
+  "build": {
+    "appId": "dev.spiritvale.valemarket",
+    "productName": "ValeMarket Desktop",
+    "executableName": "ValeMarket Desktop",
+    "artifactName": "ValeMarket-Desktop-v${version}-windows-${arch}.${ext}",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      ".electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "app-resources"
+      },
+      {
+        "from": "extensions",
+        "to": "extensions"
+      }
+    ],
+    "extraFiles": [
+      {
+        "from": ".valemarket-portable",
+        "to": ".valemarket-portable"
+      }
+    ],
+    "win": {
+      "icon": "assets/favicon.ico",
+      "target": [
+        {
+          "target": "zip",
+          "arch": ["x64"]
+        }
+      ]
+    }
   },
   "engines": {
     "bun": ">=1.4.0"

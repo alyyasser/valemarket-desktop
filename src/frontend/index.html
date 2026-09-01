@@ -289,6 +289,11 @@ header{
 .capture-setting input[type="checkbox"]:checked{background:#1c3f30;border-color:var(--acc)}
 .capture-setting input[type="checkbox"]:checked::after{transform:translateX(15px);background:var(--acc)}
 .capture-setting select{max-width:190px;min-width:0;padding:6px 8px;border:1px solid var(--line2);border-radius:7px;background:var(--panel2);color:var(--ink);font-size:11px}
+.capture-diagnostics{display:flex;align-items:center;gap:9px;padding:11px 0;border-top:1px solid var(--line)}
+.capture-diagnostics button{flex:none;padding:6px 9px;border:1px solid var(--line2);border-radius:7px;background:var(--panel2);color:var(--ink);font-size:11px;font-weight:600}
+.capture-diagnostics button:hover{border-color:var(--acc);color:var(--ink-strong)}
+.capture-diagnostics button:disabled{cursor:wait;opacity:.55}
+.capture-diagnostics span{min-width:0;color:var(--faint);font-size:10.5px;overflow-wrap:anywhere}
 .capture-warning{margin:10px 0 0;color:var(--warn);font-size:11px}
 .capture-note{margin:12px 0 0;color:var(--faint);font-size:10.5px;line-height:1.5}
 @media(max-width:700px){.collector-toggle #collector-brief{display:none}.capture-panel{top:104px}}
@@ -322,6 +327,10 @@ header{
     <span><strong>Capture adapter</strong><small>Automatic is recommended</small></span>
     <select id="collector-device"><option value="">Automatic</option></select>
   </label>
+  <div class="capture-diagnostics">
+    <button id="collector-export" type="button">Export diagnostics</button>
+    <span id="collector-export-status" aria-live="polite"></span>
+  </div>
   <p class="capture-warning" id="collector-warning" hidden></p>
   <p class="capture-note">Uploads only normalized market listings. No account, character, seller, buyer, packet, or installation-path data. If another tool uploads to ValeMarket, enable contribution in only one app.</p>
 </section>
@@ -614,6 +623,30 @@ const DESKTOP_API = "http://127.0.0.1:47831";
 let desktopState = null;
 let collectorBusy = false;
 let devicesLoaded = false;
+let diagnosticsBusy = false;
+
+function logClientEvent(event, error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const stack = error instanceof Error ? error.stack : undefined;
+  void fetch(`${DESKTOP_API}/v1/logs/client`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      level: "error",
+      event,
+      message: message.slice(0, 2_000),
+      ...(stack ? { stack: stack.slice(0, 4_000) } : {}),
+    }),
+  }).catch(() => {});
+}
+
+window.addEventListener("error", (event) => {
+  if (event.error !== undefined) logClientEvent("frontend.runtime.error", event.error);
+  else if (event.message) logClientEvent("frontend.runtime.error", event.message);
+});
+window.addEventListener("unhandledrejection", (event) => {
+  logClientEvent("frontend.runtime.unhandled_rejection", event.reason);
+});
 
 function collectorPhaseClass(state) {
   return state?.phase || "";
@@ -656,6 +689,7 @@ function renderCollector() {
   $("collector-enabled").checked = desktopState?.contributionEnabled === true;
   $("collector-enabled").disabled = collectorBusy || !desktopState;
   $("collector-device").disabled = collectorBusy || desktopState?.npcap?.availability !== "ready";
+  $("collector-export").disabled = diagnosticsBusy || !desktopState;
   const warning = desktopState?.warning;
   $("collector-warning").hidden = !warning;
   $("collector-warning").textContent = warning || "";
@@ -708,6 +742,33 @@ async function updateCollector(settings) {
   }
 }
 
+async function exportDiagnostics() {
+  diagnosticsBusy = true;
+  $("collector-export-status").textContent = "Preparing…";
+  renderCollector();
+  try {
+    const response = await fetch(`${DESKTOP_API}/v1/diagnostics/export`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    if (!response.ok) throw new Error(`desktop ${response.status}`);
+    const result = await response.json();
+    $("collector-export-status").textContent = "Saved";
+    if (globalThis.valeMarketDesktop?.openDiagnostics !== undefined) {
+      await globalThis.valeMarketDesktop.openDiagnostics(result.path);
+    } else {
+      $("collector-export-status").textContent = `Saved to ${result.path}`;
+    }
+  } catch (error) {
+    logClientEvent("frontend.diagnostics.export_failed", error);
+    $("collector-export-status").textContent = `Export failed: ${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    diagnosticsBusy = false;
+    renderCollector();
+  }
+}
+
 $("collector-toggle").addEventListener("click", () => {
   const panel = $("collector-panel");
   panel.hidden = !panel.hidden;
@@ -722,6 +783,9 @@ $("collector-enabled").addEventListener("change", (event) => {
 });
 $("collector-device").addEventListener("change", (event) => {
   void updateCollector({ deviceName: event.target.value || null });
+});
+$("collector-export").addEventListener("click", () => {
+  void exportDiagnostics();
 });
 void pollCollector();
 setInterval(() => void pollCollector(), 2_500);
@@ -1574,6 +1638,7 @@ async function load() {
     renderMeta();
     render();
   } catch (error) {
+    logClientEvent("frontend.market.load_failed", error);
     if (previousManifest) {
       renderMeta();
       $("meta").innerHTML += "<br>refresh failed · showing previous data";
