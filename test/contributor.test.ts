@@ -231,6 +231,37 @@ describe("market upload contract", () => {
     await contributor.shutdown();
   });
 
+  test("recovers a validated market page when stale link metadata misresolves it", async () => {
+    const contributor = await MarketContributor.load({
+      statePath: await createStatePath(),
+      collectorVersion: "test-collector",
+    });
+    contributor.setEnabled(true);
+    const response = unresolvedSearchPagePacket({
+      Success: true,
+      Code: 0,
+      Message: null,
+      Listings: [],
+      NextCursor: null,
+      HasMore: false,
+    });
+    response.linkResolved = true;
+    response.rpcName = "UnrelatedTargetRpc";
+    response.networkBehaviourType = "UnrelatedBehaviour";
+
+    contributor.consume(searchRequestPacket());
+    contributor.consume(response);
+
+    expect(contributor.snapshot()).toMatchObject({
+      marketEventsDecoded: 2,
+      searchRequestsDecoded: 1,
+      listingEventsDecoded: 1,
+      unresolvedInboundRpcLinks: 0,
+      lateSessionResponsesRecovered: 1,
+    });
+    await contributor.shutdown();
+  });
+
   test("does not recover an unrelated unresolved JSON response", async () => {
     const contributor = await MarketContributor.load({
       statePath: await createStatePath(),

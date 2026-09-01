@@ -143,9 +143,9 @@ export class MarketContributor {
 
   consume(packet: CapturedFishNetPacket): void {
     if (!this.enabled || this.stopped) return;
-    const unresolvedInboundRpcLink = packet.packetName === "rpcLink"
-      && packet.linkResolved === false
+    const inboundRpcLink = packet.packetName === "rpcLink"
       && packet.liteNetPacket.udpPacket.direction === "inbound";
+    const unresolvedInboundRpcLink = inboundRpcLink && packet.linkResolved === false;
     if (unresolvedInboundRpcLink) this.metrics.unresolvedInboundRpcLinks += 1;
     let events;
     try {
@@ -154,13 +154,15 @@ export class MarketContributor {
       this.warn(`Could not decode a verified market packet: ${errorMessage(error)}`, errorLogFields(error));
       return;
     }
-    if (events.length === 0 && unresolvedInboundRpcLink) {
+    if (events.length === 0 && inboundRpcLink) {
       const recovered = this.recoverSearchPage(packet);
       if (recovered !== undefined) {
         events = [this.tracker.apply(recovered)];
         this.metrics.lateSessionResponsesRecovered += 1;
         this.options.logger?.info("contributor.market_response.recovered", {
           linkId: packet.linkId,
+          originalLinkResolved: packet.linkResolved,
+          originalRpcName: packet.rpcName,
           listings: recovered.page.listings.length,
         });
       }
