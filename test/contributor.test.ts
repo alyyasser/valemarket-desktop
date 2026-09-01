@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { EventEmitter } from "node:events";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { CapturedFishNetPacket } from "@kar-mi/spirit-vale-tools-capture";
+import type { PacketCapture, NpcapDevice } from "@kar-mi/spirit-vale-tools-capture/capture";
 import type { FishNetMarketEvent, FishNetMarketListing } from "@kar-mi/spirit-vale-tools-market";
 import { MarketContributor, type ContributorSnapshot } from "../src/backend/contributor.ts";
 import { CaptureService } from "../src/backend/capture-service.ts";
@@ -202,6 +204,54 @@ describe("market upload contract", () => {
     });
   });
 
+  test("recovers a validated market page after attaching mid-session", async () => {
+    const contributor = await MarketContributor.load({
+      statePath: await createStatePath(),
+      collectorVersion: "test-collector",
+    });
+    contributor.setEnabled(true);
+
+    contributor.consume(searchRequestPacket());
+    contributor.consume(unresolvedSearchPagePacket({
+      Success: true,
+      Code: 0,
+      Message: null,
+      Listings: [],
+      NextCursor: null,
+      HasMore: false,
+    }));
+
+    expect(contributor.snapshot()).toMatchObject({
+      marketEventsDecoded: 2,
+      searchRequestsDecoded: 1,
+      listingEventsDecoded: 1,
+      unresolvedInboundRpcLinks: 1,
+      lateSessionResponsesRecovered: 1,
+    });
+    await contributor.shutdown();
+  });
+
+  test("does not recover an unrelated unresolved JSON response", async () => {
+    const contributor = await MarketContributor.load({
+      statePath: await createStatePath(),
+      collectorVersion: "test-collector",
+    });
+    contributor.setEnabled(true);
+
+    contributor.consume(searchRequestPacket());
+    contributor.consume(unresolvedSearchPagePacket({ unrelated: true }));
+
+    expect(contributor.snapshot()).toMatchObject({
+      marketEventsDecoded: 1,
+      searchRequestsDecoded: 1,
+      listingEventsDecoded: 0,
+      unresolvedInboundRpcLinks: 1,
+      lateSessionResponsesRecovered: 0,
+    });
+    expect(contributor.snapshot().warning).toBeUndefined();
+    await contributor.shutdown();
+  });
+
   test("diagnoses genuinely unresolved inbound RPC links", async () => {
     const contributor = await MarketContributor.load({
       statePath: await createStatePath(),
@@ -258,6 +308,141 @@ describe("market upload contract", () => {
       { flow: "udp 10.0.0.2:5000 <-> 203.0.113.5:6000", packets: 33, verdict: "unknown" },
     ]);
   });
+
+  test("opens Automatic on an active adapter and exposes the resolved choice", async () => {
+    const dataDirectory = path.dirname(await createStatePath());
+    const capture = new FakePacketCapture();
+    const ethernet = captureDevice("ethernet", "Realtek Ethernet", ["192.168.86.20"]);
+    const staleTap = captureDevice("stale-tap", "TAP-Windows Adapter", ["169.254.20.4"]);
+    const service = captureService(dataDirectory, capture, () => [staleTap, ethernet]);
+
+    await service.start();
+
+    expect(capture.starts).toEqual(["ethernet"]);
+    expect(service.state()).toMatchObject({
+      deviceName: null,
+      captureAdapter: {
+        name: "ethernet",
+        description: "Realtek Ethernet",
+        selection: "automatic",
+        automaticCandidate: true,
+      },
+      automaticCaptureRestarts: 0,
+    });
+    expect((await service.devices()).map(({ name, automaticCandidate }) => ({ name, automaticCandidate }))).toEqual([
+      { name: "ethernet", automaticCandidate: true },
+      { name: "stale-tap", automaticCandidate: false },
+    ]);
+
+    await service.shutdown();
+  });
+
+  test("restarts Automatic capture when the routed adapter changes", async () => {
+    const dataDirectory = path.dirname(await createStatePath());
+    const capture = new FakePacketCapture();
+    const ethernet = captureDevice("ethernet", "Realtek Ethernet", ["192.168.86.20"]);
+    const tunnel = captureDevice("tunnel", "Active tunnel", ["10.8.0.2"]);
+    let devices = [ethernet];
+    const service = captureService(dataDirectory, capture, () => devices);
+    await service.start();
+    capture.emit("targetStatus", { state: "active", processIds: [42] });
+    let decoderResets = 0;
+    internalsOf(service).fishNetDecoder.reset = () => { decoderResets += 1; };
+
+    devices = [tunnel];
+    await internalsOf(service).checkAutomaticDevice();
+
+    expect(capture.starts).toEqual(["ethernet", "tunnel"]);
+    expect(capture.stops).toBe(1);
+    expect(service.state()).toMatchObject({
+      captureAdapter: { name: "tunnel", selection: "automatic" },
+      automaticCaptureRestarts: 1,
+    });
+    expect(decoderResets).toBe(0);
+
+    await service.shutdown();
+  });
+
+  test("applies a manual adapter selection immediately", async () => {
+    const dataDirectory = path.dirname(await createStatePath());
+    const capture = new FakePacketCapture();
+    const ethernet = captureDevice("ethernet", "Realtek Ethernet", ["192.168.86.20"]);
+    const tunnel = captureDevice("tunnel", "Active tunnel", ["10.8.0.2"]);
+    const service = captureService(dataDirectory, capture, () => [ethernet, tunnel]);
+    await service.start();
+
+    await service.updateSettings({ deviceName: "tunnel" });
+
+    expect(capture.starts).toEqual(["ethernet", "tunnel"]);
+    expect(capture.stops).toBe(1);
+    expect(service.state()).toMatchObject({
+      deviceName: "tunnel",
+      captureAdapter: { name: "tunnel", selection: "manual" },
+    });
+
+    await service.shutdown();
+  });
+  test("persists and applies Linux capture mode changes immediately", async () => {
+    const dataDirectory = path.dirname(await createStatePath());
+    const capture = new FakePacketCapture();
+    const ethernet = captureDevice("ethernet", "Ethernet", ["192.168.86.20"]);
+    const service = captureService(dataDirectory, capture, () => [ethernet]);
+    await service.start();
+
+    const state = await service.updateSettings({ linuxCaptureMode: "libpcap" });
+
+    expect(capture.starts).toEqual(["ethernet", "ethernet"]);
+    expect(capture.stops).toBe(1);
+    expect(state.linuxCaptureMode).toBe("libpcap");
+    expect(JSON.parse(await readFile(path.join(dataDirectory, "settings.json"), "utf8"))).toMatchObject({
+      linuxCaptureMode: "libpcap",
+    });
+
+    await service.shutdown();
+  });
+
+
+  test("reports an active game with no attributed traffic on the resolved adapter", async () => {
+    const dataDirectory = path.dirname(await createStatePath());
+    const capture = new FakePacketCapture();
+    const ethernet = captureDevice("ethernet", "Realtek Ethernet", ["192.168.86.20"]);
+    let now = new Date("2026-09-01T20:00:00.000Z");
+    const service = captureService(dataDirectory, capture, () => [ethernet], () => now);
+    await service.start();
+    capture.emit("targetStatus", { state: "active", processIds: [42] });
+
+    now = new Date("2026-09-01T20:00:21.000Z");
+    internalsOf(service).updateCaptureHealth();
+
+    expect(service.state().warning).toBe(
+      "Spirit Vale is running, but no attributed game traffic reached Realtek Ethernet. A VPN or route optimizer may be using another adapter; select its active adapter below.",
+    );
+
+    await service.shutdown();
+  });
+
+  test("explains when capture started after the active game session", async () => {
+    const dataDirectory = path.dirname(await createStatePath());
+    const capture = new FakePacketCapture();
+    const ethernet = captureDevice("ethernet", "Realtek Ethernet", ["192.168.86.20"]);
+    const service = captureService(dataDirectory, capture, () => [ethernet]);
+    capture.emit("targetStatus", { state: "active", processIds: [42] });
+    await service.start();
+    Object.assign(contributorStateOf(service), {
+      searchRequestsDecoded: 2,
+      listingEventsDecoded: 0,
+      unresolvedInboundRpcLinks: 100,
+    });
+
+    expect(service.state()).toMatchObject({
+      captureStartedWithGameActive: true,
+      warning: "ValeMarket started after Spirit Vale's current network session was already active. Leave ValeMarket running, fully close and relaunch Spirit Vale, then search the market again.",
+    });
+
+    capture.emit("targetStatus", { state: "inactive", processIds: [] });
+    expect(service.state().captureStartedWithGameActive).toBe(false);
+    await service.shutdown();
+  });
   test("separates spawn parsing from RPC-link resolution", () => {
     const service = new CaptureService("unused", "0.1.7");
     const consume = consumeOf(service);
@@ -313,12 +498,19 @@ interface CaptureServiceInternals {
   };
   contributorState: ContributorSnapshot;
   consume(packet: CapturedFishNetPacket): void;
+  checkAutomaticDevice(): Promise<void>;
+  updateCaptureHealth(): void;
+  fishNetDecoder: { reset(): void };
 }
 
 function captureOf(service: CaptureService): CaptureServiceInternals["capture"] {
-  // Tests intentionally access the owned capture emitter without starting Npcap.
+  // Tests intentionally access the owned capture emitter without starting a live backend.
   const internals = service as unknown as CaptureServiceInternals;
   return internals.capture;
+}
+
+function internalsOf(service: CaptureService): CaptureServiceInternals {
+  return service as unknown as CaptureServiceInternals;
 }
 
 function contributorStateOf(service: CaptureService): ContributorSnapshot {
@@ -326,10 +518,94 @@ function contributorStateOf(service: CaptureService): ContributorSnapshot {
   const internals = service as unknown as CaptureServiceInternals;
   return internals.contributorState;
 }
+function searchRequestPacket(): CapturedFishNetPacket {
+  return {
+    packetName: "serverRpc",
+    rpcResolution: "verified",
+    rpcName: "RequestVendorItemList_S",
+    networkBehaviourType: "PlayerController",
+    decodedFields: [
+      { name: "dto.Query", codec: "stringUtf8Packed", value: null },
+      { name: "dto.Cursor", codec: "stringUtf8Packed", value: null },
+      { name: "dto.PageSize", codec: "packedInt32", value: 20 },
+    ],
+    liteNetPacket: { udpPacket: { direction: "outbound" } },
+  } as CapturedFishNetPacket;
+}
+
+function unresolvedSearchPagePacket(page: unknown): CapturedFishNetPacket {
+  return {
+    packetName: "rpcLink",
+    linkId: 34_244,
+    linkResolved: false,
+    payload: packedString(JSON.stringify(page)),
+    liteNetPacket: {
+      packet: { property: "channeled" },
+      udpPacket: { direction: "inbound" },
+    },
+  } as CapturedFishNetPacket;
+}
+
+function packedString(value: string): Buffer {
+  const text = Buffer.from(value, "utf8");
+  let encodedLength = BigInt(text.length) << 1n;
+  const length: number[] = [];
+  do {
+    let byte = Number(encodedLength & 0x7fn);
+    encodedLength >>= 7n;
+    if (encodedLength !== 0n) byte |= 0x80;
+    length.push(byte);
+  } while (encodedLength !== 0n);
+  return Buffer.concat([Buffer.from(length), text]);
+}
+
 
 function consumeOf(service: CaptureService): (packet: CapturedFishNetPacket) => void {
   const internals = service as unknown as CaptureServiceInternals;
   return (packet) => internals.consume(packet);
+}
+
+class FakePacketCapture extends EventEmitter {
+  state: "stopped" | "running" = "stopped";
+  readonly starts: string[] = [];
+  stops = 0;
+
+  async start(config: { deviceName?: string }): Promise<void> {
+    this.starts.push(config.deviceName ?? "");
+    this.state = "running";
+    this.emit("started");
+  }
+
+  async stop(): Promise<void> {
+    if (this.state === "running") this.stops += 1;
+    this.state = "stopped";
+    this.emit("stopped");
+  }
+}
+
+function captureService(
+  dataDirectory: string,
+  capture: FakePacketCapture,
+  devices: () => NpcapDevice[],
+  now: () => Date = () => new Date(),
+): CaptureService {
+  return new CaptureService(dataDirectory, "test", undefined, {
+    capture: capture as unknown as PacketCapture,
+    getCaptureStatus: async () => ({ availability: "ready", detail: "ready" }),
+    listCaptureDevices: async () => devices(),
+    resolveCaptureDevice: async (candidates) => {
+      const device = candidates[0];
+      return device === undefined ? { usedFallback: false } : { device, usedFallback: false };
+    },
+    captureBackendMetadata: () => ({ platform: "windows", name: "Npcap", effectiveMode: "npcap" }),
+    setLinuxCaptureMode: () => false,
+    now,
+    routeCheckIntervalMs: 0,
+  });
+}
+
+function captureDevice(name: string, description: string, addresses: string[]): NpcapDevice {
+  return { name, description, addresses, loopback: false };
 }
 
 function searchEvent(sequence: number): FishNetMarketEvent {

@@ -24,10 +24,14 @@ const CLIENT_LOG_EVENTS: Record<string, true> = {
 
 const applicationRoot = path.resolve(process.env.VALEMARKET_APP_ROOT ?? path.resolve(import.meta.dir, "../.."));
 const applicationVersion = process.env.VALEMARKET_VERSION ?? packageMetadata.version;
-const portable = existsSync(path.join(applicationRoot, ".valemarket-portable"));
-const dataDirectory = portable
-  ? path.join(applicationRoot, "data")
-  : path.join(process.env.LOCALAPPDATA ?? applicationRoot, "ValeMarket Desktop");
+const portable = process.platform === "win32" && existsSync(path.join(applicationRoot, ".valemarket-portable"));
+const dataDirectory = process.env.VALEMARKET_DATA_DIR
+  ? path.resolve(process.env.VALEMARKET_DATA_DIR)
+  : portable
+    ? path.join(applicationRoot, "data")
+    : process.platform === "win32"
+      ? path.join(process.env.LOCALAPPDATA ?? applicationRoot, "ValeMarket Desktop")
+      : path.join(process.env.XDG_DATA_HOME ?? path.join(process.env.HOME ?? applicationRoot, ".local", "share"), "valemarket-desktop");
 const logger = await LocalLogger.create(dataDirectory, applicationVersion, {
   component: "backend",
   ...(process.env.VALEMARKET_SESSION_ID ? { sessionId: process.env.VALEMARKET_SESSION_ID } : {}),
@@ -137,7 +141,9 @@ async function settingsBody(request: Request): Promise<DesktopSettingsUpdate> {
   const value: unknown = JSON.parse(text);
   if (!isRecord(value)) throw new Error("settings body must be an object");
   for (const key of Object.keys(value)) {
-    if (key !== "contributionEnabled" && key !== "deviceName") throw new Error(`unsupported setting ${key}`);
+    if (key !== "contributionEnabled" && key !== "deviceName" && key !== "linuxCaptureMode") {
+      throw new Error(`unsupported setting ${key}`);
+    }
   }
   if (value.contributionEnabled !== undefined && typeof value.contributionEnabled !== "boolean") {
     throw new Error("contributionEnabled must be boolean");
@@ -145,9 +151,16 @@ async function settingsBody(request: Request): Promise<DesktopSettingsUpdate> {
   if (value.deviceName !== undefined && value.deviceName !== null && typeof value.deviceName !== "string") {
     throw new Error("deviceName must be a string or null");
   }
+  if (value.linuxCaptureMode !== undefined
+      && value.linuxCaptureMode !== "auto"
+      && value.linuxCaptureMode !== "dumpcap"
+      && value.linuxCaptureMode !== "libpcap") {
+    throw new Error("linuxCaptureMode must be auto, dumpcap, or libpcap");
+  }
   return {
     ...(value.contributionEnabled === undefined ? {} : { contributionEnabled: value.contributionEnabled as boolean }),
     ...(value.deviceName === undefined ? {} : { deviceName: value.deviceName as string | null }),
+    ...(value.linuxCaptureMode === undefined ? {} : { linuxCaptureMode: value.linuxCaptureMode }),
   };
 }
 
@@ -189,10 +202,16 @@ async function emptyObjectBody(request: Request): Promise<void> {
 }
 
 function privacySafeDiagnosticState(state: DesktopState): unknown {
-  const { deviceName, droppedFlows, ...safeState } = state;
+  const { deviceName, captureAdapter, droppedFlows, ...safeState } = state;
   return {
     ...safeState,
     deviceConfigured: deviceName !== null,
+    ...(captureAdapter === undefined ? {} : {
+      captureAdapter: {
+        selection: captureAdapter.selection,
+        automaticCandidate: captureAdapter.automaticCandidate,
+      },
+    }),
     droppedFlows: droppedFlows.map(({ packets, verdict }) => ({ packets, verdict })),
   };
 }

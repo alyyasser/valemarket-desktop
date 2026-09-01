@@ -173,6 +173,31 @@ header{
 .quart i{font-style:normal;color:var(--faint);font-size:10px;letter-spacing:.05em;text-transform:uppercase}
 .quart b{color:var(--ink-strong);font-weight:600;font-size:13.5px}
 .quart .mid b{color:var(--acc)}
+.price-history{border-bottom:1px solid var(--line)}
+.history-head{display:flex;align-items:start;justify-content:space-between;gap:12px;padding:12px 16px 4px}
+.history-head h2{margin:0;color:var(--ink-strong);font-size:12px}
+.history-head p{margin:2px 0 0;color:var(--faint);font-size:10.5px}
+.history-change{color:var(--acc);font:650 11px var(--font-mono);white-space:nowrap}
+.history-change.down{color:#ed887e}
+.history-chart{padding:0 12px 6px}
+.history-chart svg{display:block;width:100%;height:auto}
+.history-grid{stroke:var(--line);stroke-width:1}
+.history-axis{fill:var(--faint);font:8px var(--font-mono)}
+.history-band{fill:rgba(95,211,154,.14)}
+.history-area{fill:url(#price-history-fill)}
+.history-line{fill:none;stroke:var(--acc);stroke-width:2;vector-effect:non-scaling-stroke}
+.history-volume{fill:#35483c}
+.history-legend{padding:0 16px 10px;color:var(--faint);font:8px var(--font-mono)}
+.history-legend i{display:inline-block;width:14px;height:2px;margin:0 5px 2px 10px;background:var(--acc)}
+.history-legend i:first-child{margin-left:0}
+.history-legend i.fill{height:7px;background:rgba(95,211,154,.15)}
+.history-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--line)}
+.history-stats span{min-width:0;padding:8px 10px;border-left:1px solid var(--line)}
+.history-stats span:first-child{border-left:0}
+.history-stats i{display:block;color:var(--faint);font:normal 8px var(--font-mono);letter-spacing:.04em;text-transform:uppercase}
+.history-stats b{display:block;margin-top:2px;overflow:hidden;color:var(--ink-strong);font:600 10px var(--font-mono);text-overflow:ellipsis}
+.history-state{min-height:118px;display:grid;place-items:center;padding:20px 16px;color:var(--faint);font-size:11.5px;text-align:center}
+.history-state button{margin-left:6px;padding:3px 8px;border:1px solid var(--line2);border-radius:6px;background:var(--panel2);color:var(--dim)}
 .modes{display:flex;gap:6px;padding:10px 16px 0}
 .vlist{padding:6px 12px 40px}
 .group{margin:12px 4px 4px;color:var(--faint);font-size:11.5px}
@@ -268,7 +293,7 @@ header{
 .capture-dot{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:none}
 .capture-dot.capturing{background:var(--acc);box-shadow:0 0 0 4px rgba(95,211,154,.12)}
 .capture-dot.waiting-for-game{background:var(--gold)}
-.capture-dot.error,.capture-dot.npcap-unavailable{background:var(--warn)}
+.capture-dot.error,.capture-dot.capture-unavailable{background:var(--warn)}
 .capture-panel{position:fixed;z-index:60;top:58px;right:20px;width:min(340px,calc(100vw - 40px));padding:16px;background:#151c17;border:1px solid var(--line2);border-radius:10px;box-shadow:0 18px 60px rgba(0,0,0,.5)}
 .capture-panel[hidden]{display:none}
 .capture-head{display:flex;align-items:start;justify-content:space-between;gap:16px;padding-bottom:12px;border-bottom:1px solid var(--line)}
@@ -281,6 +306,7 @@ header{
 .capture-state strong{color:var(--ink-strong);font-size:12.5px}
 .capture-state span{margin-top:2px;color:var(--faint);font-size:11px}
 .capture-setting{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 0;border-top:1px solid var(--line)}
+.capture-setting[hidden]{display:none}
 .capture-setting strong,.capture-setting small{display:block}
 .capture-setting strong{font-size:12.5px}
 .capture-setting small{margin-top:2px;color:var(--faint);font-size:10.5px}
@@ -312,7 +338,7 @@ header{
 </header>
 <section class="capture-panel" id="collector-panel" hidden>
   <div class="capture-head">
-    <div><strong>Passive contributor</strong><span>Separate Npcap session · protocol v2</span></div>
+    <div><strong>Passive contributor</strong><span id="collector-backend">Packet capture · protocol v2</span></div>
     <button class="capture-close" id="collector-close" type="button" aria-label="Close contributor settings">×</button>
   </div>
   <div class="capture-state">
@@ -324,8 +350,16 @@ header{
     <input id="collector-enabled" type="checkbox">
   </label>
   <label class="capture-setting">
-    <span><strong>Capture adapter</strong><small>Automatic is recommended</small></span>
+    <span><strong>Capture adapter</strong><small id="collector-device-status">Automatic chooses the active default route</small></span>
     <select id="collector-device"><option value="">Automatic</option></select>
+  </label>
+  <label class="capture-setting" id="collector-mode-row" hidden>
+    <span><strong>Linux capture</strong><small>Automatic prefers dumpcap, then direct libpcap</small></span>
+    <select id="collector-mode">
+      <option value="auto">Automatic</option>
+      <option value="dumpcap">dumpcap</option>
+      <option value="libpcap">Direct libpcap</option>
+    </select>
   </label>
   <div class="capture-diagnostics">
     <button id="collector-export" type="button">Export diagnostics</button>
@@ -511,6 +545,148 @@ function quartileStrip(quartiles) {
     <span><i>High</i>${price(quartiles.high)}</span>
   </div>`;
 }
+function priceHistoryKey(item) {
+  return `${item.itemType}:${item.id}`;
+}
+
+function hourlyPriceHistory(rows) {
+  return rows.map((row) => {
+    const time = Date.parse(row.bucketStart);
+    const prices = [row.low, row.p25, row.median, row.p75, row.high];
+    if (!Number.isFinite(time) || !prices.every(Number.isFinite)
+        || !Number.isSafeInteger(row.listingCount) || row.listingCount < 0) {
+      throw new Error("invalid hourly price point");
+    }
+    return {
+      time,
+      low: row.low,
+      p25: row.p25,
+      median: row.median,
+      p75: row.p75,
+      high: row.high,
+      volume: row.listingCount,
+    };
+  });
+}
+
+function historyWithCurrent(points, view) {
+  if (!view?.quartiles) return points;
+  const current = {
+    time: Math.floor(Date.parse(state.manifest.generatedAt) / 3_600_000) * 3_600_000,
+    low: view.quartiles.low,
+    p25: view.quartiles.p25,
+    median: view.quartiles.median,
+    p75: view.quartiles.p75,
+    high: view.quartiles.high,
+    volume: view.listingCount,
+  };
+  if (!points.length) return [current];
+  if (points[points.length - 1].time === current.time) return [...points.slice(0, -1), current];
+  return [...points, current];
+}
+
+function historySpan(points) {
+  const hours = Math.max(1, Math.round((points[points.length - 1].time - points[0].time) / 3_600_000));
+  return hours < 24 ? `${hours}h observed` : `${Math.max(1, Math.round(hours / 24))}d observed`;
+}
+
+function priceHistorySvg(points, item) {
+  const width = 408;
+  const height = 172;
+  const pad = { left: 47, right: 8, top: 10, bottom: 24 };
+  let minimum = Math.min(...points.map((point) => point.low));
+  let maximum = Math.max(...points.map((point) => point.high));
+  if (minimum === maximum) {
+    const margin = Math.max(1, minimum * .05);
+    minimum -= margin;
+    maximum += margin;
+  }
+  const firstTime = points[0].time;
+  const lastTime = points[points.length - 1].time;
+  const x = (time) => pad.left + (time - firstTime) / (lastTime - firstTime) * (width - pad.left - pad.right);
+  const y = (value) => pad.top + (maximum - value) / (maximum - minimum) * (height - pad.top - pad.bottom);
+  const path = (key) => points.map((point, index) =>
+    `${index ? "L" : "M"}${x(point.time).toFixed(1)},${y(point[key]).toFixed(1)}`).join(" ");
+  const band = `${points.map((point, index) =>
+    `${index ? "L" : "M"}${x(point.time).toFixed(1)},${y(point.p75).toFixed(1)}`).join(" ")} ${
+    [...points].reverse().map((point) => `L${x(point.time).toFixed(1)},${y(point.p25).toFixed(1)}`).join(" ")} Z`;
+  const maximumVolume = Math.max(1, ...points.map((point) => point.volume));
+  const span = lastTime - firstTime;
+  const timeLabel = (time) => span >= 3 * 86_400_000
+    ? new Date(time).toLocaleDateString(undefined, { weekday: "short" })
+    : new Date(time).toLocaleTimeString(undefined, { hour: "numeric" });
+  return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(item.name)} hourly median asking price">
+    <defs><linearGradient id="price-history-fill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5fd39a" stop-opacity=".18"/><stop offset="1" stop-color="#5fd39a" stop-opacity="0"/>
+    </linearGradient></defs>
+    ${[0, .5, 1].map((step) => {
+      const lineY = pad.top + step * (height - pad.top - pad.bottom);
+      const value = maximum - step * (maximum - minimum);
+      return `<line class="history-grid" x1="${pad.left}" x2="${width - pad.right}" y1="${lineY}" y2="${lineY}"/>
+        <text class="history-axis" x="${pad.left - 6}" y="${lineY + 3}" text-anchor="end">${moneyShort(value)}</text>`;
+    }).join("")}
+    ${points.map((point) => {
+      const barHeight = point.volume / maximumVolume * 25;
+      return `<rect class="history-volume" x="${x(point.time) - 1}" y="${height - pad.bottom - barHeight}" width="2" height="${barHeight}"/>`;
+    }).join("")}
+    <path class="history-band" d="${band}"/>
+    <path class="history-area" d="${path("median")} L${x(lastTime)},${height - pad.bottom} L${x(firstTime)},${height - pad.bottom} Z"/>
+    <path class="history-line" d="${path("median")}"/>
+    ${[0, .25, .5, .75, 1].map((step) => {
+      const time = firstTime + span * step;
+      return `<text class="history-axis" x="${pad.left + (width - pad.left - pad.right) * step}" y="${height - 7}" text-anchor="${step === 0 ? "start" : step === 1 ? "end" : "middle"}">${timeLabel(time)}</text>`;
+    }).join("")}
+  </svg>`;
+}
+
+function priceHistorySection(item, view) {
+  const entry = state.priceHistory.get(priceHistoryKey(item));
+  if (!entry || entry.status === "loading") {
+    return `<section class="price-history"><div class="history-head"><div><h2>Price over time</h2><p>Hourly median · rolling 7 days</p></div></div>
+      <div class="history-state">Loading observed price history…</div></section>`;
+  }
+  if (entry.status === "error") {
+    return `<section class="price-history"><div class="history-head"><div><h2>Price over time</h2><p>Hourly median · rolling 7 days</p></div></div>
+      <div class="history-state">Price history is temporarily unavailable.<button type="button" data-history-retry="1">Retry</button></div></section>`;
+  }
+  const points = historyWithCurrent(entry.points, view);
+  if (points.length < 2) {
+    return `<section class="price-history"><div class="history-head"><div><h2>Price over time</h2><p>Hourly median · rolling 7 days</p></div></div>
+      <div class="history-state">More observations are needed before a trend can be drawn.</div></section>`;
+  }
+  const change = (points[points.length - 1].median / points[0].median - 1) * 100;
+  const medians = points.map((point) => point.median).sort((left, right) => left - right);
+  return `<section class="price-history">
+    <div class="history-head"><div><h2>Price over time</h2><p>Hourly median · ${historySpan(points)} of rolling 7d</p></div>
+      <b class="history-change${change < 0 ? " down" : ""}">${change >= 0 ? "+" : ""}${change.toFixed(1)}%</b></div>
+    <div class="history-chart">${priceHistorySvg(points, item)}</div>
+    <div class="history-legend"><i></i> median<i class="fill"></i> P25–P75 <span>· bars are observed listings</span></div>
+    <div class="history-stats">
+      <span><i>Window low</i><b title="${money(Math.min(...points.map((point) => point.low)))}">${moneyShort(Math.min(...points.map((point) => point.low)))}</b></span>
+      <span><i>Window median</i><b title="${money(percentileDisc(medians, .5))}">${moneyShort(percentileDisc(medians, .5))}</b></span>
+      <span><i>Window high</i><b title="${money(Math.max(...points.map((point) => point.high)))}">${moneyShort(Math.max(...points.map((point) => point.high)))}</b></span>
+    </div>
+  </section>`;
+}
+
+async function ensurePriceHistory(item) {
+  const key = priceHistoryKey(item);
+  if (state.priceHistory.has(key)) return;
+  state.priceHistory.set(key, { status: "loading" });
+  try {
+    const response = await fetch(`${API}/v2/markets/global/items/${item.itemType}/${encodeURIComponent(item.id)}/price-history`);
+    if (!response.ok) throw new Error(`price history ${response.status}`);
+    const body = await response.json();
+    if (body.marketId !== "global" || body.itemType !== item.itemType || body.itemId !== item.id
+        || body.interval !== "hour" || body.windowSeconds !== 604800 || !Array.isArray(body.points)) {
+      throw new Error("invalid price history response");
+    }
+    state.priceHistory.set(key, { status: "ready", points: hourlyPriceHistory(body.points) });
+  } catch {
+    state.priceHistory.set(key, { status: "error" });
+  }
+  if (state.open === item.id) renderInspector();
+}
 
 function priceDepthOf(variants) {
   const provided = variants.map((variant) => variant.depth).filter((depth) => depth?.levels?.length);
@@ -617,12 +793,13 @@ const state = {
   open: null,
   family: false,
   shown: PAGE,
+  priceHistory: new Map(),
 };
 const $ = (id) => document.getElementById(id);
 const DESKTOP_API = "http://127.0.0.1:47831";
 let desktopState = null;
 let collectorBusy = false;
-let devicesLoaded = false;
+let devicesLoadedAt = 0;
 let diagnosticsBusy = false;
 
 function logClientEvent(event, error) {
@@ -670,6 +847,8 @@ function renderCollector() {
     : "Market browsing remains available";
   $("collector-diagnostics").textContent = desktopState
     ? `${desktopState.packetsObserved.toLocaleString()} game packets · ${(desktopState.marketEventsDecoded ?? 0).toLocaleString()} market events · ${(desktopState.searchRequestsDecoded ?? 0).toLocaleString()} search requests · ${(desktopState.listingEventsDecoded ?? 0).toLocaleString()} listing responses`
+      + ((desktopState.automaticCaptureRestarts ?? 0) > 0 ? ` · ${desktopState.automaticCaptureRestarts.toLocaleString()} automatic route restarts` : "")
+      + ((desktopState.lateSessionResponsesRecovered ?? 0) > 0 ? ` · ${desktopState.lateSessionResponsesRecovered.toLocaleString()} late-session responses recovered` : "")
     : "";
   const droppedFlows = desktopState?.droppedFlows ?? [];
   const unattributedPackets = droppedFlows.reduce((total, flow) => total + flow.packets, 0);
@@ -686,9 +865,26 @@ function renderCollector() {
       + ((desktopState.unresolvedInboundRpcLinkIds?.length ?? 0) > 0 ? ` · unresolved IDs ${desktopState.unresolvedInboundRpcLinkIds.join(", ")}` : "")
       + (unattributedPackets > 0 ? ` · ${unattributedPackets.toLocaleString()} unattributed (${gameTrafficFlows} game-like flows)` : "")
     : "";
+  const captureAdapter = desktopState?.captureAdapter;
+  const captureBackend = desktopState?.captureBackend;
+  $("collector-backend").textContent = captureBackend
+    ? `${captureBackend.name} · protocol v2`
+    : "Packet capture · protocol v2";
+  $("collector-mode-row").hidden = captureBackend?.platform !== "linux";
+  $("collector-mode").value = desktopState?.linuxCaptureMode || "auto";
+  $("collector-device-status").textContent = captureAdapter
+    ? `${captureAdapter.selection === "automatic" ? "Automatic" : "Manual"} · ${captureAdapter.description}`
+    : "Automatic chooses the active default route";
+  const automaticOption = $("collector-device").options[0];
+  if (automaticOption) {
+    automaticOption.textContent = captureAdapter?.selection === "automatic"
+      ? `Automatic — ${captureAdapter.description}`
+      : "Automatic";
+  }
   $("collector-enabled").checked = desktopState?.contributionEnabled === true;
   $("collector-enabled").disabled = collectorBusy || !desktopState;
-  $("collector-device").disabled = collectorBusy || desktopState?.npcap?.availability !== "ready";
+  $("collector-device").disabled = collectorBusy || captureBackend?.availability !== "ready";
+  $("collector-mode").disabled = collectorBusy || captureBackend?.platform !== "linux";
   $("collector-export").disabled = diagnosticsBusy || !desktopState;
   const warning = desktopState?.warning;
   $("collector-warning").hidden = !warning;
@@ -696,19 +892,27 @@ function renderCollector() {
 }
 
 async function loadCaptureDevices() {
-  if (devicesLoaded || desktopState?.npcap?.availability !== "ready") return;
+  if (Date.now() - devicesLoadedAt < 15_000 || desktopState?.captureBackend?.availability !== "ready") return;
   const response = await fetch(`${DESKTOP_API}/v1/devices`, { cache: "no-store" });
   if (!response.ok) return;
   const body = await response.json();
   const select = $("collector-device");
+  select.replaceChildren();
+  const automatic = document.createElement("option");
+  automatic.value = "";
+  automatic.textContent = desktopState?.captureAdapter?.selection === "automatic"
+    ? `Automatic — ${desktopState.captureAdapter.description}`
+    : "Automatic";
+  select.append(automatic);
   for (const device of body.devices || []) {
+    if (device.loopback || (!device.automaticCandidate && device.name !== desktopState?.deviceName)) continue;
     const option = document.createElement("option");
     option.value = device.name;
-    option.textContent = device.description || device.name;
+    option.textContent = `${device.description || device.name}${device.automaticCandidate ? "" : " (inactive)"}`;
     select.append(option);
   }
   select.value = desktopState?.deviceName || "";
-  devicesLoaded = true;
+  devicesLoadedAt = Date.now();
 }
 
 async function pollCollector() {
@@ -720,7 +924,7 @@ async function pollCollector() {
     await loadCaptureDevices();
   } catch {
     desktopState = null;
-    devicesLoaded = false;
+    devicesLoadedAt = 0;
     renderCollector();
   }
 }
@@ -736,6 +940,8 @@ async function updateCollector(settings) {
     });
     if (!response.ok) throw new Error(`desktop ${response.status}`);
     desktopState = await response.json();
+    devicesLoadedAt = 0;
+    await loadCaptureDevices();
   } finally {
     collectorBusy = false;
     renderCollector();
@@ -772,6 +978,10 @@ async function exportDiagnostics() {
 $("collector-toggle").addEventListener("click", () => {
   const panel = $("collector-panel");
   panel.hidden = !panel.hidden;
+  if (!panel.hidden) {
+    devicesLoadedAt = 0;
+    void loadCaptureDevices();
+  }
   $("collector-toggle").setAttribute("aria-expanded", String(!panel.hidden));
 });
 $("collector-close").addEventListener("click", () => {
@@ -783,6 +993,9 @@ $("collector-enabled").addEventListener("change", (event) => {
 });
 $("collector-device").addEventListener("change", (event) => {
   void updateCollector({ deviceName: event.target.value || null });
+});
+$("collector-mode").addEventListener("change", (event) => {
+  void updateCollector({ linuxCaptureMode: event.target.value });
 });
 $("collector-export").addEventListener("click", () => {
   void exportDiagnostics();
@@ -1344,12 +1557,14 @@ function renderInspector() {
       <span class="age">oldest listing ${ageHTML(view?.firstSeenAt)} · newest listing ${ageHTML(view?.lastSeenAt)}</span>
     </div>
     ${quartileStrip(view?.quartiles)}
+    ${item.fungible && view ? priceHistorySection(item, view) : ""}
     ${item.fungible ? depthDetails(view?.depth) : ""}
     ${item.fungible ? "" : `<div class="modes">
       <button type="button" class="chip${state.family ? "" : " on"}" data-family="0">All rolls</button>
       <button type="button" class="chip${state.family ? " on" : ""}" data-family="1">Same rolls</button>
     </div>`}
     ${body}`;
+  if (item.fungible && view) void ensurePriceHistory(item);
 }
 
 function variantRow(variant) {
@@ -1485,6 +1700,14 @@ $("list").addEventListener("click", (event) => {
 
 $("inspect").addEventListener("click", (event) => {
   if (event.target.dataset.close) { state.open = null; render(); return; }
+  if (event.target.dataset.historyRetry) {
+    const item = state.open ? state.byId.get(state.open) : null;
+    if (item) {
+      state.priceHistory.delete(priceHistoryKey(item));
+      renderInspector();
+    }
+    return;
+  }
   if (event.target.dataset.more) { state.shown += PAGE; renderInspector(); return; }
   if (event.target.dataset.family !== undefined) {
     state.family = event.target.dataset.family === "1";
@@ -1610,6 +1833,7 @@ async function load() {
         variant.lastSeenAt > newest ? variant.lastSeenAt : newest, "");
       const item = {
         id: itemId,
+        itemType: rows[0].itemType,
         name: rows.find((row) => row.displayName)?.displayName || meta.name,
         kind: meta.kind,
         wiki: meta.wiki,

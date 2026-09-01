@@ -21,9 +21,10 @@ function applicationRoot(): string {
 
 function dataDirectory(): string {
   const root = applicationRoot();
-  return existsSync(path.join(root, ".valemarket-portable"))
-    ? path.join(root, "data")
-    : path.join(process.env.LOCALAPPDATA ?? root, "ValeMarket Desktop");
+  if (process.platform === "win32" && existsSync(path.join(root, ".valemarket-portable"))) return path.join(root, "data");
+  return process.platform === "win32"
+    ? path.join(process.env.LOCALAPPDATA ?? root, "ValeMarket Desktop")
+    : app.getPath("userData");
 }
 
 function packagedPath(...segments: string[]): string {
@@ -40,6 +41,7 @@ function startBackend(): ChildProcessWithoutNullStreams {
       ...process.env,
       VALEMARKET_APP_ROOT: applicationRoot(),
       VALEMARKET_VERSION: app.getVersion(),
+      VALEMARKET_DATA_DIR: dataDirectory(),
       VALEMARKET_SESSION_ID: logger?.sessionId,
     },
     stdio: ["pipe", "pipe", "pipe"],

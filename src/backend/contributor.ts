@@ -1,5 +1,10 @@
 import { CURRENT_GAME_BUILD_FINGERPRINT, type CapturedFishNetPacket } from "@kar-mi/spirit-vale-tools-capture";
-import { FishNetMarketTracker } from "@kar-mi/spirit-vale-tools-market";
+import { readSignedPackedWhole } from "@kar-mi/spirit-vale-tools-capture/wire-reader";
+import {
+  decodeFishNetMarketPacket,
+  FishNetMarketTracker,
+  type FishNetMarketEvent,
+} from "@kar-mi/spirit-vale-tools-market";
 import {
   MARKET_API_URL,
   MARKET_PACKAGE_VERSION,
@@ -10,6 +15,8 @@ import {
 import { normalizeMarketEvent } from "./normalizer.ts";
 import { errorLogFields, type AppLogger, type LogFields } from "./logger.ts";
 import { errorMessage, isRecord, loadJson, writeJsonAtomic } from "./storage.ts";
+
+type FishNetSearchPageEvent = Extract<FishNetMarketEvent, { kind: "searchPage" }>;
 
 const FLUSH_OBSERVATIONS = 50;
 const MAX_BATCH_OBSERVATIONS = 100;
@@ -48,6 +55,7 @@ export interface ContributorSnapshot {
   normalizationErrors: number;
   duplicatesSuppressed: number;
   unresolvedInboundRpcLinks: number;
+  lateSessionResponsesRecovered: number;
   latestObservationAt?: string;
   latestUploadAt?: string;
   warning?: string;
@@ -72,6 +80,7 @@ export class MarketContributor {
   private readonly fetch: typeof fetch;
   private readonly now: () => Date;
   private readonly metrics: ContributorSnapshot;
+  private pendingSearchResponses = 0;
   private operations: Promise<void> = Promise.resolve();
   private flushTimer: ReturnType<typeof setTimeout> | undefined;
   private uploadTimer: ReturnType<typeof setTimeout> | undefined;
@@ -100,6 +109,7 @@ export class MarketContributor {
       normalizationErrors: 0,
       duplicatesSuppressed: 0,
       unresolvedInboundRpcLinks: 0,
+      lateSessionResponsesRecovered: 0,
     };
   }
 
@@ -124,6 +134,7 @@ export class MarketContributor {
       this.flushTimer = undefined;
       this.uploadTimer = undefined;
       this.pending.clear();
+      this.pendingSearchResponses = 0;
       this.publish();
       return;
     }
@@ -143,6 +154,17 @@ export class MarketContributor {
       this.warn(`Could not decode a verified market packet: ${errorMessage(error)}`, errorLogFields(error));
       return;
     }
+    if (events.length === 0 && unresolvedInboundRpcLink) {
+      const recovered = this.recoverSearchPage(packet);
+      if (recovered !== undefined) {
+        events = [this.tracker.apply(recovered)];
+        this.metrics.lateSessionResponsesRecovered += 1;
+        this.options.logger?.info("contributor.market_response.recovered", {
+          linkId: packet.linkId,
+          listings: recovered.page.listings.length,
+        });
+      }
+    }
     if (events.length === 0) {
       if (unresolvedInboundRpcLink) this.publish();
       return;
@@ -157,7 +179,12 @@ export class MarketContributor {
     });
     this.metrics.marketEventsDecoded += decoded.length;
     for (const result of decoded) {
-      if (result.event.kind === "searchRequest") this.metrics.searchRequestsDecoded += 1;
+      if (result.event.kind === "searchRequest") {
+        this.metrics.searchRequestsDecoded += 1;
+        this.pendingSearchResponses = Math.min(32, this.pendingSearchResponses + 1);
+      } else if (result.event.kind === "searchPage") {
+        this.pendingSearchResponses = Math.max(0, this.pendingSearchResponses - 1);
+      }
       if (result.listingCount === undefined) continue;
       this.metrics.listingEventsDecoded += 1;
       this.metrics.listingsDecoded += result.listingCount;
@@ -189,6 +216,42 @@ export class MarketContributor {
       }
     });
   }
+  private recoverSearchPage(packet: CapturedFishNetPacket): FishNetSearchPageEvent | undefined {
+    if (this.pendingSearchResponses === 0 || packet.liteNetPacket.packet.property !== "channeled") return;
+    let length;
+    try {
+      length = readSignedPackedWhole(packet.payload, 0);
+    } catch {
+      return;
+    }
+    if (length.value < 0 || length.nextOffset + length.value !== packet.payload.length) return;
+    const bytes = packet.payload.subarray(length.nextOffset);
+    const pageJson = bytes.toString("utf8");
+    if (!Buffer.from(pageJson, "utf8").equals(bytes)) return;
+    const candidate: CapturedFishNetPacket = {
+      ...packet,
+      linkedPacketName: "targetRpc",
+      linkResolved: true,
+      rpcHash: 73,
+      rpcName: "RequestVendorItemList_T",
+      rpcResolution: "verified",
+      networkBehaviourType: "PlayerController",
+      decodedFields: [{
+        name: "pageJson",
+        typeName: "System.String",
+        codec: "stringUtf8Packed",
+        value: pageJson,
+      }],
+    };
+    try {
+      const events = decodeFishNetMarketPacket(candidate);
+      const event = events.length === 1 ? events[0] : undefined;
+      return event?.kind === "searchPage" ? event : undefined;
+    } catch {
+      return;
+    }
+  }
+
 
   async shutdown(): Promise<void> {
     this.options.logger?.info("contributor.shutdown.started", {

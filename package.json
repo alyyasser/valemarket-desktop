@@ -1,8 +1,8 @@
 {
   "name": "valemarket-npcap",
-  "version": "0.1.8",
+  "version": "0.2.0",
   "private": true,
-  "description": "Windows desktop market browser and passive community contributor for Spirit Vale",
+  "description": "Cross-platform desktop market browser and passive community contributor for Spirit Vale",
   "author": "ValeMarket",
   "repository": {
     "type": "git",
@@ -19,7 +19,9 @@
     "prepare": "bun run src/build.ts",
     "dev": "bun run prepare && electron .",
     "build": "bun run prepare",
-    "package": "bun run prepare && electron-builder --win zip --x64 --publish never",
+    "package": "bun run package:windows",
+    "package:windows": "bun run prepare && electron-builder --win zip --x64 --publish never",
+    "package:linux": "bun run prepare && electron-builder --linux --x64 --publish never",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "check": "bun run typecheck && bun test"
@@ -39,7 +41,6 @@
     "appId": "dev.spiritvale.valemarket",
     "productName": "ValeMarket Desktop",
     "executableName": "ValeMarket Desktop",
-    "artifactName": "ValeMarket-Desktop-v${version}-windows-${arch}.${ext}",
     "asar": true,
     "directories": {
       "output": "dist"
@@ -65,10 +66,25 @@
       }
     ],
     "win": {
+      "artifactName": "ValeMarket-Desktop-v${version}-windows-${arch}.${ext}",
       "icon": "assets/favicon.ico",
       "target": [
         {
           "target": "zip",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "linux": {
+      "artifactName": "ValeMarket-Desktop-v${version}-linux-${arch}.${ext}",
+      "category": "Network",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "tar.gz",
           "arch": ["x64"]
         }
       ]

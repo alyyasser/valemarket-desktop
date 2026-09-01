@@ -109,7 +109,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (desktopState?.npcap.availability !== "ready") {
+    if (desktopState?.captureBackend.availability !== "ready") {
       setDevices([]);
       return;
     }
@@ -117,7 +117,7 @@ function App() {
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
       .then((data: { devices: CaptureDevice[] }) => setDevices(data.devices))
       .catch(() => setDevices([]));
-  }, [desktopState?.npcap.availability]);
+  }, [desktopState?.captureBackend.availability]);
 
   useEffect(() => {
     if (!selected) {
@@ -208,7 +208,7 @@ function App() {
             />
           </label>
 
-          {desktopState?.npcap.availability === "ready" && devices.length > 0 && (
+          {desktopState?.captureBackend.availability === "ready" && devices.length > 0 && (
             <label class="device-field">
               <span>Network adapter</span>
               <select
@@ -224,7 +224,7 @@ function App() {
             </label>
           )}
 
-          {desktopState?.npcap.availability === "missing" && (
+          {desktopState?.captureBackend.platform === "windows" && desktopState.captureBackend.availability === "missing" && (
             <button class="text-action" type="button" onClick={() => openExternal("https://npcap.com/#download")}>Install Npcap ↗</button>
           )}
 
@@ -456,9 +456,9 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 function collectorCaption(state?: DesktopState): string {
   if (!state) return "Connecting to local backend";
   if (state.phase === "capturing") return `${formatter.format(state.observationsPrepared)} prepared · ${formatter.format(state.observationsUploaded)} uploaded`;
-  if (state.phase === "npcap-unavailable") return "Npcap is required only for contribution";
+  if (state.phase === "capture-unavailable") return `${state.captureBackend.name} is required only for contribution`;
   if (state.phase === "error") return "Open the warning below for details";
-  return state.npcap.version ? `Npcap ${state.npcap.version}` : "Read access remains available";
+  return state.captureBackend.version ? `${state.captureBackend.name} ${state.captureBackend.version}` : "Read access remains available";
 }
 
 function searchableListing(listing: MarketListing): string {

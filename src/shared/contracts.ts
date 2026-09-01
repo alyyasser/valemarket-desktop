@@ -58,24 +58,41 @@ export interface CaptureDevice {
   description: string;
   addresses: string[];
   loopback: boolean;
+  automaticCandidate: boolean;
 }
 
-export type CollectorPhase = "disabled" | "npcap-unavailable" | "waiting-for-game" | "capturing" | "error";
+export type LinuxCaptureMode = "auto" | "dumpcap" | "libpcap";
+export type CollectorPhase = "disabled" | "capture-unavailable" | "waiting-for-game" | "capturing" | "error";
 
 export interface DesktopState {
   version: string;
   contributionEnabled: boolean;
   deviceName: string | null;
+  linuxCaptureMode: LinuxCaptureMode;
+  captureAdapter?: {
+    name: string;
+    description: string;
+    selection: "automatic" | "manual";
+    automaticCandidate: boolean;
+  };
   phase: CollectorPhase;
   detail: string;
-  npcap: {
+  captureBackend: {
+    platform: "windows" | "linux" | "unsupported";
+    name: string;
     availability: "ready" | "missing" | "error";
     detail: string;
     version?: string;
+    mode?: LinuxCaptureMode;
+    effectiveMode?: "npcap" | "dumpcap" | "libpcap";
   };
   gameDetected: boolean;
+  captureStartedWithGameActive: boolean;
   packetsObserved: number;
+  lastAttributedPacketAt?: string;
+  automaticCaptureRestarts: number;
   marketEventsDecoded: number;
+  lateSessionResponsesRecovered: number;
   searchRequestsDecoded: number;
   listingEventsDecoded: number;
   listingsDecoded: number;
@@ -108,4 +125,5 @@ export interface DesktopState {
 export interface DesktopSettingsUpdate {
   contributionEnabled?: boolean;
   deviceName?: string | null;
+  linuxCaptureMode?: LinuxCaptureMode;
 }
