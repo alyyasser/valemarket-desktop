@@ -59,7 +59,7 @@ export async function normalizeListing(
     ...(stat.value === undefined ? {} : { value: stat.value }),
     percent: stat.percent,
   }));
-  const enhancements = parseMarketEnhancements(listing.item.payloadJson);
+  const enhancements = parseMarketEnhancements(listing.item.payloadJson, listing.item.itemType);
   const observedAt = listing.updatedAt > 0n
     ? unixSecondsToIso(listing.updatedAt, "listing update")
     : capturedAt.toISOString();
@@ -86,7 +86,7 @@ export async function normalizeListing(
   return observation;
 }
 
-export function parseMarketEnhancements(payloadJson: string | null): MarketUploadEnhancements | undefined {
+export function parseMarketEnhancements(payloadJson: string | null, itemType: number): MarketUploadEnhancements | undefined {
   if (payloadJson === null) return undefined;
   let value: unknown;
   try {
@@ -103,12 +103,22 @@ export function parseMarketEnhancements(payloadJson: string | null): MarketUploa
   const spentPotential = enhancementInteger(value.SpentPotential);
   const cards = enhancementCards(value.Cards);
   const gems = enhancementGems(value.Gems);
+  const hasArtifactSlot = itemType === 4 && value.Slot !== undefined && value.Slot !== null;
+  const artifactSlot = hasArtifactSlot ? enhancementInteger(value.Slot) : undefined;
   if (refine === undefined
       || startingPotential === undefined
       || spentPotential === undefined
       || cards === undefined
-      || gems === undefined) return undefined;
-  return { refine, startingPotential, spentPotential, cards, gems };
+      || gems === undefined
+      || (hasArtifactSlot && (artifactSlot === undefined || artifactSlot > 3))) return undefined;
+  return {
+    refine,
+    startingPotential,
+    spentPotential,
+    cards,
+    gems,
+    ...(artifactSlot === undefined ? {} : { artifactSlot }),
+  };
 }
 
 function enhancementInteger(value: unknown): number | undefined {

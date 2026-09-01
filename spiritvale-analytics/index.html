@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+  <title>SpiritVale Analytics</title>
+  <style>
+    @font-face { font-family: Atkinson; src: url('/assets/fonts/atkinson-hyperlegible-next-latin.woff2') format('woff2'); font-display: swap; }
+    @font-face { font-family: Crimson; src: url('/assets/fonts/crimson-pro-latin.woff2') format('woff2'); font-display: swap; }
+    @font-face { font-family: JetBrains; src: url('/assets/fonts/jetbrains-mono-latin.woff2') format('woff2'); font-display: swap; }
+    :root {
+      --ink: #09100f;
+      --deep: #0d1715;
+      --panel: #121f1c;
+      --panel-2: #172723;
+      --line: #2a3c36;
+      --text: #e5ede7;
+      --muted: #9bafa5;
+      --quiet: #71877c;
+      --jade: #52c18d;
+      --jade-soft: #b5e7cf;
+      --amber: #e3aa55;
+      --red: #df6f62;
+      --blue: #78a9c5;
+      --shadow: 0 18px 60px rgba(0, 0, 0, .38);
+      font-family: Atkinson, system-ui, sans-serif;
+      color: var(--text);
+      background: var(--ink);
+      font-synthesis: none;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; background: radial-gradient(circle at 80% -20%, #1d332c 0, transparent 34rem), var(--ink); }
+    button, input, select { font: inherit; }
+    button, select { min-height: 44px; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--jade); outline-offset: 2px; }
+    .mono { font-family: JetBrains, ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+    .page { min-height: 100vh; }
+    .masthead { height: 72px; display: flex; align-items: center; gap: 28px; padding: 0 28px; border-bottom: 1px solid var(--line); background: rgba(9,16,15,.9); backdrop-filter: blur(14px); position: sticky; top: 0; z-index: 5; }
+    .identity { display: flex; align-items: center; gap: 12px; min-width: 0; color: inherit; text-decoration: none; }
+    .mark { width: 38px; height: 38px; display: grid; place-items: center; background: var(--jade); color: var(--ink); font: 700 23px Crimson, serif; clip-path: polygon(50% 0, 94% 24%, 86% 81%, 50% 100%, 14% 81%, 6% 24%); }
+    .identity strong { display: block; font-size: 15px; letter-spacing: .02em; }
+    .identity span { display: block; color: var(--muted); font-size: 12px; }
+    .snapshot { margin-left: auto; color: var(--muted); font-size: 12px; text-align: right; }
+    .snapshot b { color: var(--jade-soft); font-weight: 500; }
+    .primary-nav { align-self: stretch; display: flex; align-items: stretch; gap: 4px; }
+    .nav-link { position: relative; display: flex; align-items: center; min-height: 44px; padding: 0 14px; border: 0; background: transparent; color: var(--muted); text-decoration: none; font-size: 13px; cursor: pointer; }
+    .nav-link:hover { color: var(--text); }
+    .nav-link.active { color: var(--text); }
+    .nav-link.active::after { content: ''; position: absolute; left: 14px; right: 14px; bottom: 0; height: 2px; background: var(--jade); }
+    .eyebrow { color: var(--jade); font: 11px JetBrains, monospace; text-transform: uppercase; letter-spacing: .13em; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { font: 500 clamp(34px, 5vw, 64px)/.96 Crimson, serif; letter-spacing: -.025em; margin-bottom: 14px; }
+    h2 { font: 500 28px/1.05 Crimson, serif; margin-bottom: 8px; }
+    h3 { font-size: 14px; letter-spacing: .01em; }
+    .lede { max-width: 720px; color: var(--muted); font-size: 16px; line-height: 1.55; }
+    .muted { color: var(--muted); }
+    .quiet { color: var(--quiet); }
+    .positive { color: var(--jade-soft); }
+    .negative { color: #ef9a8f; }
+    .warn { color: var(--amber); }
+    .surface { border: 1px solid var(--line); background: color-mix(in srgb, var(--panel), transparent 3%); box-shadow: 0 1px 0 rgba(255,255,255,.025) inset; }
+    .method-note { border-left: 2px solid var(--amber); padding: 12px 14px; background: rgba(227,170,85,.07); color: #d8c5a3; font-size: 13px; line-height: 1.45; }
+    .metric { font: 500 28px Crimson, serif; font-variant-numeric: tabular-nums; }
+    .metric-label { color: var(--muted); font-size: 12px; }
+    .chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font: 10px JetBrains, monospace; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+    .chip.high { color: var(--jade-soft); border-color: #376b56; }
+    .chip.medium { color: #e9c78d; border-color: #715b35; }
+    .chip.low { color: var(--quiet); }
+    .search { width: 100%; min-height: 44px; padding: 10px 12px; color: var(--text); background: var(--deep); border: 1px solid var(--line); border-radius: 4px; }
+    .search::placeholder { color: var(--quiet); }
+    .loading { min-height: 70vh; display: grid; place-items: center; color: var(--muted); }
+    .error { margin: 40px; padding: 24px; border: 1px solid var(--red); color: #f3aea5; }
+    .route-content { animation: surface-in .22s ease-out both; }
+    .premium-bar { transform-origin: center; animation: grow-bar .42s .08s ease-out both; }
+    @keyframes surface-in { from { opacity: 0; transform: translateY(5px); } }
+    @keyframes grow-bar { from { transform: scaleX(0); } }
+
+    /* Item analytics workbench. */
+    .workbench { display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: calc(100vh - 72px); }
+    .item-rail { border-right: 1px solid var(--line); background: rgba(13,23,21,.76); padding: 20px 16px; min-width: 0; }
+    .item-rail .eyebrow { margin: 6px 4px 12px; }
+    .item-list { margin: 16px -4px 0; display: grid; gap: 3px; max-height: calc(100vh - 190px); overflow: auto; padding: 4px; }
+    .item-button { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; align-items: center; min-height: 52px; padding: 9px 10px; border: 1px solid transparent; border-radius: 4px; background: transparent; text-align: left; cursor: pointer; }
+    .item-button:hover { background: var(--panel); }
+    .item-button.active { background: var(--panel-2); border-color: #3b5d50; }
+    .item-button strong, .item-button span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .item-button strong { display: block; font-size: 13px; }
+    .item-button span { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+    .item-button em { color: var(--quiet); font: normal 10px JetBrains, monospace; }
+    .work-main { padding: clamp(28px, 5vw, 68px); max-width: 1280px; width: 100%; }
+    .work-title { display: flex; align-items: end; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--line); padding-bottom: 28px; margin-bottom: 28px; }
+    .work-title .eyebrow { margin-bottom: 10px; }
+    .price-band { min-width: 290px; text-align: right; }
+    .price-band strong { font: 500 34px Crimson, serif; white-space: nowrap; }
+    .price-band span { display: block; color: var(--muted); font-size: 12px; }
+    .range-track { width: 290px; height: 8px; margin: 10px 0 6px auto; background: var(--panel-2); position: relative; overflow: hidden; }
+    .range-track::after { content: ''; position: absolute; inset: 0 24% 0 18%; background: linear-gradient(90deg, var(--blue), var(--jade)); }
+    .work-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(260px, .7fr); gap: 20px; align-items: start; }
+    .rank-panel { padding: 20px; }
+    .rank-head { display: flex; justify-content: space-between; align-items: start; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+    .rank-head p { color: var(--muted); font-size: 12px; margin: 3px 0 0; }
+    .stat-rows { display: grid; }
+    .stat-row { display: grid; grid-template-columns: minmax(105px,.8fr) minmax(120px,1fr) 78px 62px; align-items: center; gap: 12px; min-height: 62px; border-bottom: 1px solid color-mix(in srgb, var(--line), transparent 35%); }
+    .stat-name strong { display: block; font-size: 14px; }
+    .stat-name span { color: var(--quiet); font-size: 10px; }
+    .premium-track { height: 24px; position: relative; background: linear-gradient(90deg, rgba(223,111,98,.08) 0 49.5%, var(--line) 49.5% 50.5%, rgba(82,193,141,.08) 50.5%); overflow: hidden; }
+    .premium-bar { position: absolute; top: 7px; height: 10px; min-width: 2px; }
+    .premium-bar.up { left: 50%; background: var(--jade); }
+    .premium-bar.down { right: 50%; background: var(--red); }
+    .premium-value { text-align: right; font: 12px JetBrains, monospace; }
+    .side-stack { display: grid; gap: 14px; }
+    .side-card { padding: 18px; }
+    .side-card h3 { margin-bottom: 14px; }
+    .mini-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .mini-metrics > div { border-top: 1px solid var(--line); padding-top: 10px; }
+    .mini-metrics span { color: var(--muted); font-size: 11px; }
+    .mini-metrics strong { display: block; font: 500 22px Crimson, serif; overflow-wrap: anywhere; }
+
+
+    /* Fungible-item anomaly review. */
+    .surveillance { min-height: calc(100vh - 72px); background-image: linear-gradient(rgba(82,193,141,.025) 1px, transparent 1px), linear-gradient(90deg, rgba(82,193,141,.025) 1px, transparent 1px); background-size: 32px 32px; }
+    .surv-head { padding: 36px 32px 26px; display: grid; grid-template-columns: minmax(0,1fr) repeat(3, 150px); gap: 18px; align-items: end; border-bottom: 1px solid var(--line); }
+    .surv-head h1 { font-size: clamp(32px, 4vw, 52px); margin-bottom: 8px; }
+    .surv-head .lede { font-size: 13px; margin-bottom: 0; }
+    .surv-metric { border-left: 1px solid var(--line); padding-left: 16px; }
+    .surv-metric strong { display: block; font: 500 25px Crimson, serif; }
+    .surv-metric span { color: var(--muted); font-size: 11px; }
+    .boundary { margin: 20px 32px 0; display: flex; gap: 14px; align-items: start; padding: 13px 15px; border: 1px solid #695435; background: rgba(227,170,85,.07); color: #d8c5a3; font-size: 12px; line-height: 1.45; }
+    .boundary strong { color: var(--amber); white-space: nowrap; }
+    .anomaly-tools { margin: 14px 32px 0; display: grid; grid-template-columns: minmax(220px, 420px) 180px; gap: 10px; }
+    .filter-select { min-height: 44px; padding: 9px 34px 9px 11px; color: var(--text); background: var(--deep); border: 1px solid var(--line); border-radius: 4px; }
+    .surv-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(390px,.85fr); gap: 1px; margin: 20px 32px 0; background: var(--line); border: 1px solid var(--line); }
+    .queue { background: var(--deep); min-width: 0; }
+    .queue-head { min-height: 70px; padding: 15px 18px; display: flex; justify-content: space-between; align-items: center; gap: 14px; border-bottom: 1px solid var(--line); }
+    .queue-head h2 { font: 500 22px Crimson, serif; margin: 0; }
+    .queue-head span { color: var(--muted); font-size: 11px; }
+    .anomaly-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .anomaly-table th { padding: 10px 12px; color: var(--quiet); font: 9px JetBrains, monospace; text-transform: uppercase; letter-spacing: .06em; text-align: left; border-bottom: 1px solid var(--line); }
+    .anomaly-table td { padding: 12px; border-bottom: 1px solid color-mix(in srgb, var(--line), transparent 35%); vertical-align: middle; }
+    .anomaly-table td:nth-child(n+2) { font-family: JetBrains, monospace; font-size: 10px; }
+    .anomaly-table tr:hover td { background: var(--panel); }
+    .priority { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 7px; background: var(--quiet); }
+    .priority.high { background: var(--red); box-shadow: 0 0 10px rgba(223,111,98,.45); }
+    .priority.medium { background: var(--amber); }
+    .cluster-list { display: grid; max-height: 720px; overflow: auto; }
+    .cluster { padding: 15px 18px; border-bottom: 1px solid var(--line); }
+    .cluster-top { display: flex; justify-content: space-between; gap: 12px; }
+    .cluster-top strong { font-size: 13px; }
+    .cluster-top span { font: 10px JetBrains, monospace; color: var(--jade-soft); }
+    .cluster-fingerprint { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 12px; }
+    .cluster-fingerprint div { border-top: 1px solid var(--line); padding-top: 7px; }
+    .cluster-fingerprint strong { display: block; font: 12px JetBrains, monospace; }
+    .cluster-fingerprint span { color: var(--quiet); font-size: 9px; text-transform: uppercase; }
+    .share-track { margin-top: 12px; height: 4px; background: var(--panel-2); }
+    .share-track i { display: block; height: 4px; background: linear-gradient(90deg, var(--blue), var(--jade)); }
+
+    @media (max-width: 980px) {
+      .workbench { grid-template-columns: 230px minmax(0,1fr); }
+      .work-main { padding: 32px 24px; }
+      .work-title { align-items: start; }
+      .work-grid { grid-template-columns: 1fr; }
+      .surv-head { grid-template-columns: 1fr repeat(3, 120px); }
+      .surv-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 700px) {
+      .masthead { gap: 8px; padding: 0 16px; }
+      .snapshot { display: none; }
+      .identity { gap: 8px; }
+      .identity span { display: none; }
+      .identity strong { font-size: 13px; }
+      .mark { width: 32px; height: 32px; font-size: 20px; }
+      .primary-nav { margin-left: auto; }
+      .nav-link { padding: 0 9px; font-size: 12px; }
+      .nav-link.active::after { left: 9px; right: 9px; }
+      .workbench { display: block; }
+      .item-rail { border-right: 0; border-bottom: 1px solid var(--line); padding: 14px; }
+      .item-list { display: flex; max-height: none; overflow-x: auto; }
+      .item-button { min-width: 190px; }
+      .work-main { padding: 30px 16px; }
+      .work-title { display: block; }
+      .price-band { text-align: left; margin-top: 22px; }
+      .range-track { margin-left: 0; width: 100%; }
+      .stat-row { grid-template-columns: minmax(90px,1fr) 72px 56px; gap: 10px; }
+      .premium-track { display: none; }
+      .surv-head { padding: 28px 16px 20px; grid-template-columns: repeat(3,1fr); }
+      .surv-head > div:first-child { grid-column: 1 / -1; }
+      .surv-metric { padding-left: 10px; }
+      .boundary, .surv-grid { margin-left: 16px; margin-right: 16px; }
+      .anomaly-tools { margin-left: 16px; margin-right: 16px; grid-template-columns: 1fr; }
+      .anomaly-table th:nth-child(4), .anomaly-table td:nth-child(4), .anomaly-table th:nth-child(5), .anomaly-table td:nth-child(5) { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <main id="app" class="loading">Loading local market snapshot…</main>
+  <script>
+    let data;
+    let itemQuery = '';
+    let anomalyQuery = '';
+    let priorityFilter = 'all';
+    let selectedItemKey = '';
+
+    const app = document.getElementById('app');
+    const esc = value => String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
+    const number = new Intl.NumberFormat('en-US');
+    const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
+    const money = value => number.format(Math.round(value));
+    const signedPct = value => `${value >= 0 ? '+' : ''}${number.format(value)}%`;
+    const when = value => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value));
+    const pageMode = () => location.pathname.startsWith('/anomalies') ? 'anomalies' : 'items';
+    const itemPath = item => `/items/${item.itemType}/${encodeURIComponent(item.itemId)}`;
+
+    function itemFromPath() {
+      const match = location.pathname.match(/^\/items\/(\d+)\/(.+)$/);
+      if (!match) return undefined;
+      const itemType = Number(match[1]);
+      const itemId = decodeURIComponent(match[2]);
+      return data.itemAnalytics.find(item => item.itemType === itemType && item.itemId === itemId);
+    }
+
+    function navigate(path) {
+      if (location.pathname !== path) history.pushState(null, '', path);
+      if (pageMode() === 'items') {
+        const routed = itemFromPath();
+        if (routed) selectedItemKey = routed.key;
+      }
+      scrollTo({ top: 0, behavior: 'auto' });
+      render();
+    }
+
+    function masthead(mode) {
+      return `<header class="masthead">
+        <a class="identity" href="/items" data-route="/items" aria-label="SpiritVale Analytics items">
+          <div class="mark" aria-hidden="true">V</div>
+          <div><strong>SpiritVale Analytics</strong><span>Observed market intelligence</span></div>
+        </a>
+        <nav class="primary-nav" aria-label="Primary navigation">
+          <a class="nav-link ${mode === 'items' ? 'active' : ''}" href="/items" data-route="/items">Items</a>
+          <a class="nav-link ${mode === 'anomalies' ? 'active' : ''}" href="/anomalies" data-route="/anomalies">Anomalies</a>
+        </nav>
+        <div class="snapshot">Observed snapshot <b>${esc(when(data.generatedAt))}</b><br>${number.format(data.summary.activeListings)} active asks</div>
+      </header>`;
+    }
+
+    function confidence(value) {
+      return `<span class="chip ${esc(value)}" aria-label="${esc(value)} confidence" title="${esc(value)} confidence">${esc(value)}</span>`;
+    }
+
+    function selectedItem() {
+      return data.itemAnalytics.find(item => item.key === selectedItemKey) || data.itemAnalytics[0];
+    }
+
+    function premiumWidth(value) {
+      return Math.min(50, 50 * Math.log1p(Math.abs(value)) / Math.log(501));
+    }
+
+    function renderWorkbench() {
+      const needle = itemQuery.trim().toLowerCase();
+      const items = data.itemAnalytics.filter(item =>
+        !needle || `${item.name} ${item.slot || ''} ${item.section || ''} ${item.kind}`.toLowerCase().includes(needle));
+      const item = selectedItem();
+      const ranked = item.stats.slice(0, 10);
+      const strongest = ranked.find(stat => stat.confidence !== 'low') || ranked[0];
+
+      return `<div class="page">${masthead('items')}<div class="route-content"><div class="workbench">
+        <aside class="item-rail" aria-label="Rolled items">
+          <div class="eyebrow">Choose an item</div>
+          <input class="search" id="item-search" type="search" value="${esc(itemQuery)}" placeholder="Search equipment or artifacts" aria-label="Search rolled items">
+          <div class="item-list">${items.slice(0, 100).map(entry => `<button type="button" class="item-button ${entry.key === item.key ? 'active' : ''}" data-item="${esc(entry.key)}">
+            <span><strong>${esc(entry.name)}</strong><span>${esc([entry.section, entry.slot].filter(Boolean).join(' · ') || entry.kind)}</span></span><em>${compact.format(entry.listingCount)}</em>
+          </button>`).join('') || '<div class="muted">No matching items.</div>'}</div>
+        </aside>
+        <section class="work-main">
+          <div class="work-title">
+            <div><div class="eyebrow">${esc(item.kind)} · ${number.format(item.listingCount)} current listings</div><h1>${esc(item.name)}</h1><p class="lede">Stats ranked by their observed effect on asking price after matching comparable enhancement bands.</p></div>
+            <div class="price-band"><span>Middle half of current asks</span><strong class="mono">${money(item.p25Price)}–${money(item.p75Price)}</strong><div class="range-track" aria-hidden="true"></div><span>Median ${money(item.medianPrice)} gold</span></div>
+          </div>
+          <div class="work-grid">
+            <section class="rank-panel surface">
+              <div class="rank-head"><div><h2>Stat value fingerprint</h2><p>Adjusted asking-price lift vs. matched listings without the stat</p></div><span class="chip">observational</span></div>
+              <div class="stat-rows">${ranked.map(stat => {
+                const width = premiumWidth(stat.premiumPct);
+                return `<div class="stat-row">
+                  <div class="stat-name"><strong>${esc(stat.stat)}</strong><span>${number.format(stat.matchedWith)} with · ${stat.strata} bands</span></div>
+                  <div class="premium-track" aria-hidden="true"><i class="premium-bar ${stat.premiumPct >= 0 ? 'up' : 'down'}" style="width:${width}%"></i></div>
+                  <div class="premium-value ${stat.premiumPct >= 0 ? 'positive' : 'negative'}">${signedPct(stat.premiumPct)}</div>
+                  <div>${confidence(stat.confidence)}</div>
+                </div>`;
+              }).join('') || '<div class="readout">Not enough matched observations for this item.</div>'}</div>
+            </section>
+            <aside class="side-stack">
+              <section class="side-card surface">
+                <h3>Strongest observed signal</h3>
+                <div class="mini-metrics">
+                  <div><strong>${strongest ? esc(strongest.stat) : '—'}</strong><span>stat</span></div>
+                  <div><strong class="positive">${strongest ? signedPct(strongest.premiumPct) : '—'}</strong><span>matched price lift</span></div>
+                  <div><strong>${strongest ? strongest.directionAgreementPct + '%' : '—'}</strong><span>direction agreement</span></div>
+                  <div><strong>${strongest ? number.format(Math.min(strongest.matchedWith, strongest.matchedWithout)) : '—'}</strong><span>effective support</span></div>
+                </div>
+                <p class="readout">This ranks market preference, not combat strength. Popular build stats can command a premium without being mechanically strongest.</p>
+              </section>
+              <section class="method-note"><strong>Method.</strong><br>${esc(data.methodology.statValue)}</section>
+              <section class="side-card surface"><h3>Interpretation</h3><p class="readout">Percentages appear only after at least 20 matched listings per side. Confidence combines effective support, matched-band coverage, and direction agreement.</p></section>
+            </aside>
+          </div>
+        </section>
+      </div></div></div>`;
+    }
+
+    function renderAnomalies() {
+      const needle = anomalyQuery.trim().toLowerCase();
+      const outliers = data.priceOutliers
+        .filter(row => (!needle || row.name.toLowerCase().includes(needle)) && (priorityFilter === 'all' || row.reviewPriority === priorityFilter))
+        .slice(0, 70);
+      const clusters = data.stockClusters
+        .filter(row => !needle || row.name.toLowerCase().includes(needle))
+        .slice(0, 50);
+
+      return `<div class="page surveillance">${masthead('anomalies')}<div class="route-content">
+        <section class="surv-head">
+          <div><div class="eyebrow">Review surface</div><h1>Market anomaly queue</h1><p class="lede">Separate extreme price distance from repeated inventory concentration. Each signal keeps its raw evidence visible.</p></div>
+          <div class="surv-metric"><strong>${number.format(data.summary.fungibleListings)}</strong><span>fungible asks screened</span></div>
+          <div class="surv-metric"><strong>${number.format(data.summary.priceOutliers)}</strong><span>price outlier rows</span></div>
+          <div class="surv-metric"><strong>${number.format(data.summary.stockClusters)}</strong><span>repeated-stack cohorts</span></div>
+        </section>
+        <div class="boundary"><strong>Evidence boundary</strong><span>${esc(data.methodology.boundary)} Automated signals are review inputs, not accusations.</span></div>
+        <div class="anomaly-tools" aria-label="Anomaly filters">
+          <input class="search" id="anomaly-search" type="search" value="${esc(anomalyQuery)}" placeholder="Filter anomalies by item" aria-label="Filter anomalies by item">
+          <select class="filter-select" id="priority-filter" aria-label="Filter price outliers by review priority">
+            <option value="all" ${priorityFilter === 'all' ? 'selected' : ''}>All priorities</option>
+            <option value="high" ${priorityFilter === 'high' ? 'selected' : ''}>High priority</option>
+            <option value="medium" ${priorityFilter === 'medium' ? 'selected' : ''}>Medium priority</option>
+            <option value="low" ${priorityFilter === 'low' ? 'selected' : ''}>Low priority</option>
+          </select>
+        </div>
+        <div class="surv-grid">
+          <section class="queue">
+            <div class="queue-head"><div><h2>Extreme unit-price distance</h2><span>${number.format(outliers.length)} matching listing signals · robust log-price deviation</span></div><span class="chip">listing grain</span></div>
+            <div style="overflow:auto"><table class="anomaly-table"><thead><tr><th>Item</th><th>Unit ask</th><th>Baseline</th><th>Distance</th><th>Lot value</th><th>Observed</th></tr></thead><tbody>
+              ${outliers.map(row => `<tr><td><span class="priority ${esc(row.reviewPriority)}"></span><strong>${esc(row.name)}</strong><br><span class="quiet">${esc(row.reviewPriority)} review priority</span></td><td class="warn">${money(row.unitPrice)}</td><td>${money(row.baselineMedian)}</td><td>${number.format(row.priceRatio)}×<br><span class="quiet">z ${number.format(row.robustZ)}</span></td><td>${money(row.lotValue)}<br><span class="quiet">qty ${money(row.quantity)}</span></td><td>${esc(when(row.firstSeenAt))}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">No price outliers match these filters.</td></tr>'}
+            </tbody></table></div>
+          </section>
+          <aside class="queue">
+            <div class="queue-head"><div><h2>Repeated-stack cohorts</h2><span>${number.format(clusters.length)} matching cohorts · same price and quantity</span></div><span class="chip">cohort grain</span></div>
+            <div class="cluster-list">${clusters.map(row => `<article class="cluster">
+              <div class="cluster-top"><strong>${esc(row.name)}</strong><span>${number.format(row.unitSharePct)}% of current units</span></div>
+              <div class="cluster-fingerprint"><div><strong>${row.repeatedListings} × ${money(row.quantity)}</strong><span>identical stacks</span></div><div><strong>${money(row.unitPrice)}</strong><span>unit price</span></div><div><strong>${number.format(row.firstSeenSpanMinutes)} min</strong><span>observed span</span></div></div>
+              <div class="share-track" aria-label="${number.format(row.unitSharePct)} percent of current units"><i style="width:${Math.min(100, row.unitSharePct)}%"></i></div>
+            </article>`).join('') || '<div class="cluster muted">No repeated-stack cohorts match this item.</div>'}</div>
+          </aside>
+        </div>
+      </div></div>`;
+    }
+
+    function bind() {
+      document.querySelectorAll('[data-route]').forEach(link => link.addEventListener('click', event => {
+        event.preventDefault();
+        navigate(link.dataset.route);
+      }));
+      document.querySelectorAll('[data-item]').forEach(button => button.addEventListener('click', () => {
+        const item = data.itemAnalytics.find(entry => entry.key === button.dataset.item);
+        if (!item) return;
+        selectedItemKey = item.key;
+        navigate(itemPath(item));
+      }));
+
+      const itemSearch = document.getElementById('item-search');
+      if (itemSearch) itemSearch.addEventListener('input', event => {
+        itemQuery = event.target.value;
+        const start = event.target.selectionStart;
+        render();
+        const next = document.getElementById('item-search');
+        next.focus();
+        next.setSelectionRange(start, start);
+      });
+
+      const anomalySearch = document.getElementById('anomaly-search');
+      if (anomalySearch) anomalySearch.addEventListener('input', event => {
+        anomalyQuery = event.target.value;
+        const start = event.target.selectionStart;
+        render();
+        const next = document.getElementById('anomaly-search');
+        next.focus();
+        next.setSelectionRange(start, start);
+      });
+
+      const priority = document.getElementById('priority-filter');
+      if (priority) priority.addEventListener('change', event => {
+        priorityFilter = event.target.value;
+        render();
+      });
+    }
+
+    function render() {
+      if (!data) return;
+      const mode = pageMode();
+      app.className = '';
+      app.innerHTML = mode === 'anomalies' ? renderAnomalies() : renderWorkbench();
+      document.title = mode === 'anomalies'
+        ? 'Anomalies — SpiritVale Analytics'
+        : `${selectedItem().name} — SpiritVale Analytics`;
+      bind();
+    }
+
+    addEventListener('popstate', () => {
+      const routed = itemFromPath();
+      if (routed) selectedItemKey = routed.key;
+      render();
+    });
+
+    fetch('/api/data', { cache: 'no-store' })
+      .then(response => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then(value => {
+        data = value;
+        const preferred = data.itemAnalytics.find(item => item.name === 'Duskbringer') || data.itemAnalytics[0];
+        const routed = itemFromPath();
+        selectedItemKey = (routed || preferred).key;
+        if (pageMode() === 'items' && !routed) history.replaceState(null, '', itemPath(preferred));
+        render();
+      })
+      .catch(error => {
+        app.className = 'error';
+        app.textContent = `Could not load SpiritVale Analytics: ${error.message}`;
+      });
+  </script>
+</body>
+</html>

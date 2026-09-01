@@ -53,7 +53,8 @@ const defaultSettings = (): DesktopSettings => ({
   linuxCaptureMode: "auto",
 });
 const UNRESOLVED_LINK_WARNING = "Market requests are visible, but linked responses are unresolved. Share this diagnostic state; restarting alone will not fix this capture path.";
-const LATE_SESSION_WARNING = "ValeMarket started after Spirit Vale's current network session was already active. Leave ValeMarket running, fully close and relaunch Spirit Vale, then search the market again.";
+const LATE_SESSION_WARNING = "ValeMarket attached after Spirit Vale's current network session began and could not recover market responses. Keep ValeMarket running, fully close and relaunch Spirit Vale, then search again. If this persists, export another report.";
+const RECOVERY_DECODE_WARNING = "ValeMarket found possible late-session market responses but could not decode their payloads. Share this diagnostic state; restarting alone may not fix this capture path.";
 const FRAGMENT_DROP_WARNING = "Some fragmented game messages were incomplete. Select the network adapter carrying Spirit Vale traffic directly, then search again.";
 const CAPTURE_HEALTH_TIMEOUT_MS = 20_000;
 const ROUTE_CHECK_INTERVAL_MS = 5_000;
@@ -86,6 +87,10 @@ export class CaptureService {
     duplicatesSuppressed: 0,
     lateSessionResponsesRecovered: 0,
     unresolvedInboundRpcLinks: 0,
+    lateSessionRecoveryCandidates: 0,
+    lateSessionRecoveryFramingRejected: 0,
+    lateSessionRecoveryPayloadCandidates: 0,
+    lateSessionRecoveryDecodeRejected: 0,
   };
   private captureStatus: CaptureBackendStatus = { availability: "error", detail: "Checking packet capture…" };
   private gameDetected = false;
@@ -213,7 +218,12 @@ export class CaptureService {
       && this.fragmentAssembliesDropped > 0
       ? FRAGMENT_DROP_WARNING
       : undefined;
-    const warning = this.contributorState.warning ?? this.captureHealthWarning ?? fragmentDropWarning ?? sessionSetupWarning ?? this.warning;
+    const recoveryDecodeWarning = this.contributorState.searchRequestsDecoded > 0
+      && this.contributorState.listingEventsDecoded === 0
+      && this.contributorState.lateSessionRecoveryDecodeRejected > 0
+      ? RECOVERY_DECODE_WARNING
+      : undefined;
+    const warning = this.contributorState.warning ?? this.captureHealthWarning ?? recoveryDecodeWarning ?? fragmentDropWarning ?? sessionSetupWarning ?? this.warning;
     return {
       version: this.version,
       contributionEnabled: this.settings.contributionEnabled,
@@ -240,6 +250,10 @@ export class CaptureService {
       automaticCaptureRestarts: this.automaticCaptureRestarts,
       marketEventsDecoded: this.contributorState.marketEventsDecoded,
       lateSessionResponsesRecovered: this.contributorState.lateSessionResponsesRecovered,
+      lateSessionRecoveryCandidates: this.contributorState.lateSessionRecoveryCandidates,
+      lateSessionRecoveryFramingRejected: this.contributorState.lateSessionRecoveryFramingRejected,
+      lateSessionRecoveryPayloadCandidates: this.contributorState.lateSessionRecoveryPayloadCandidates,
+      lateSessionRecoveryDecodeRejected: this.contributorState.lateSessionRecoveryDecodeRejected,
       searchRequestsDecoded: this.contributorState.searchRequestsDecoded,
       listingEventsDecoded: this.contributorState.listingEventsDecoded,
       listingsDecoded: this.contributorState.listingsDecoded,

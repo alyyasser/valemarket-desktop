@@ -87,6 +87,7 @@ describe("market upload contract", () => {
     source.item.itemId = "Holy Vow";
     source.item.payloadJson = JSON.stringify({
       Id: "Acolyte",
+      Slot: 2,
       Refine: 9,
       Gems: [
         { Id: "Ruby", Refine: 3 },
@@ -104,6 +105,7 @@ describe("market upload contract", () => {
         { itemId: "Ruby", refine: 3 },
         { itemId: "Sapphire", refine: 5 },
       ],
+      artifactSlot: 2,
     });
   });
 
@@ -227,6 +229,39 @@ describe("market upload contract", () => {
       listingEventsDecoded: 1,
       unresolvedInboundRpcLinks: 1,
       lateSessionResponsesRecovered: 1,
+      lateSessionRecoveryCandidates: 1,
+      lateSessionRecoveryPayloadCandidates: 1,
+      lateSessionRecoveryDecodeRejected: 0,
+    });
+    await contributor.shutdown();
+  });
+
+  test("recovers a validated market page from an unreliable late-session link", async () => {
+    const contributor = await MarketContributor.load({
+      statePath: await createStatePath(),
+      collectorVersion: "test-collector",
+    });
+    contributor.setEnabled(true);
+
+    contributor.consume(searchRequestPacket());
+    contributor.consume(unresolvedSearchPagePacket({
+      Success: true,
+      Code: 0,
+      Message: null,
+      Listings: [],
+      NextCursor: null,
+      HasMore: false,
+    }, "unreliable"));
+
+    expect(contributor.snapshot()).toMatchObject({
+      marketEventsDecoded: 2,
+      searchRequestsDecoded: 1,
+      listingEventsDecoded: 1,
+      unresolvedInboundRpcLinks: 1,
+      lateSessionResponsesRecovered: 1,
+      lateSessionRecoveryCandidates: 1,
+      lateSessionRecoveryPayloadCandidates: 1,
+      lateSessionRecoveryDecodeRejected: 0,
     });
     await contributor.shutdown();
   });
@@ -278,8 +313,16 @@ describe("market upload contract", () => {
       listingEventsDecoded: 0,
       unresolvedInboundRpcLinks: 1,
       lateSessionResponsesRecovered: 0,
+      lateSessionRecoveryCandidates: 1,
+      lateSessionRecoveryPayloadCandidates: 1,
+      lateSessionRecoveryDecodeRejected: 1,
     });
     expect(contributor.snapshot().warning).toBeUndefined();
+    const service = new CaptureService("unused", "test");
+    Object.assign(contributorStateOf(service), contributor.snapshot());
+    expect(service.state().warning).toBe(
+      "ValeMarket found possible late-session market responses but could not decode their payloads. Share this diagnostic state; restarting alone may not fix this capture path.",
+    );
     await contributor.shutdown();
   });
 
@@ -467,7 +510,7 @@ describe("market upload contract", () => {
 
     expect(service.state()).toMatchObject({
       captureStartedWithGameActive: true,
-      warning: "ValeMarket started after Spirit Vale's current network session was already active. Leave ValeMarket running, fully close and relaunch Spirit Vale, then search the market again.",
+      warning: "ValeMarket attached after Spirit Vale's current network session began and could not recover market responses. Keep ValeMarket running, fully close and relaunch Spirit Vale, then search again. If this persists, export another report.",
     });
 
     capture.emit("targetStatus", { state: "inactive", processIds: [] });
@@ -564,14 +607,17 @@ function searchRequestPacket(): CapturedFishNetPacket {
   } as CapturedFishNetPacket;
 }
 
-function unresolvedSearchPagePacket(page: unknown): CapturedFishNetPacket {
+function unresolvedSearchPagePacket(
+  page: unknown,
+  property: "channeled" | "unreliable" = "channeled",
+): CapturedFishNetPacket {
   return {
     packetName: "rpcLink",
     linkId: 34_244,
     linkResolved: false,
     payload: packedString(JSON.stringify(page)),
     liteNetPacket: {
-      packet: { property: "channeled" },
+      packet: { property },
       udpPacket: { direction: "inbound" },
     },
   } as CapturedFishNetPacket;

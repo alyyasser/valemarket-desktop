@@ -56,6 +56,10 @@ export interface ContributorSnapshot {
   duplicatesSuppressed: number;
   unresolvedInboundRpcLinks: number;
   lateSessionResponsesRecovered: number;
+  lateSessionRecoveryCandidates: number;
+  lateSessionRecoveryFramingRejected: number;
+  lateSessionRecoveryPayloadCandidates: number;
+  lateSessionRecoveryDecodeRejected: number;
   latestObservationAt?: string;
   latestUploadAt?: string;
   warning?: string;
@@ -81,6 +85,7 @@ export class MarketContributor {
   private readonly now: () => Date;
   private readonly metrics: ContributorSnapshot;
   private pendingSearchResponses = 0;
+  private lateSessionRecoveryFailuresLogged = 0;
   private operations: Promise<void> = Promise.resolve();
   private flushTimer: ReturnType<typeof setTimeout> | undefined;
   private uploadTimer: ReturnType<typeof setTimeout> | undefined;
@@ -110,6 +115,10 @@ export class MarketContributor {
       duplicatesSuppressed: 0,
       unresolvedInboundRpcLinks: 0,
       lateSessionResponsesRecovered: 0,
+      lateSessionRecoveryCandidates: 0,
+      lateSessionRecoveryFramingRejected: 0,
+      lateSessionRecoveryPayloadCandidates: 0,
+      lateSessionRecoveryDecodeRejected: 0,
     };
   }
 
@@ -219,17 +228,28 @@ export class MarketContributor {
     });
   }
   private recoverSearchPage(packet: CapturedFishNetPacket): FishNetSearchPageEvent | undefined {
-    if (this.pendingSearchResponses === 0 || packet.liteNetPacket.packet.property !== "channeled") return;
+    if (this.pendingSearchResponses === 0) return;
+    const transport = packet.liteNetPacket.packet.property;
+    if (transport !== "channeled" && transport !== "unreliable") return;
+    this.metrics.lateSessionRecoveryCandidates += 1;
     let length;
     try {
       length = readSignedPackedWhole(packet.payload, 0);
     } catch {
+      this.metrics.lateSessionRecoveryFramingRejected += 1;
       return;
     }
-    if (length.value < 0 || length.nextOffset + length.value !== packet.payload.length) return;
+    if (length.value < 0 || length.nextOffset + length.value !== packet.payload.length) {
+      this.metrics.lateSessionRecoveryFramingRejected += 1;
+      return;
+    }
     const bytes = packet.payload.subarray(length.nextOffset);
     const pageJson = bytes.toString("utf8");
-    if (!Buffer.from(pageJson, "utf8").equals(bytes)) return;
+    if (!Buffer.from(pageJson, "utf8").equals(bytes)) {
+      this.metrics.lateSessionRecoveryFramingRejected += 1;
+      return;
+    }
+    this.metrics.lateSessionRecoveryPayloadCandidates += 1;
     const candidate: CapturedFishNetPacket = {
       ...packet,
       linkedPacketName: "targetRpc",
@@ -248,10 +268,24 @@ export class MarketContributor {
     try {
       const events = decodeFishNetMarketPacket(candidate);
       const event = events.length === 1 ? events[0] : undefined;
-      return event?.kind === "searchPage" ? event : undefined;
-    } catch {
-      return;
+      if (event?.kind === "searchPage") return event;
+      this.rejectRecoveryCandidate(packet, transport, "decoded payload was not a market search page");
+    } catch (error) {
+      this.rejectRecoveryCandidate(packet, transport, errorMessage(error));
     }
+    return;
+  }
+
+  private rejectRecoveryCandidate(packet: CapturedFishNetPacket, transport: string, reason: string): void {
+    this.metrics.lateSessionRecoveryDecodeRejected += 1;
+    if (this.lateSessionRecoveryFailuresLogged >= 3) return;
+    this.lateSessionRecoveryFailuresLogged += 1;
+    this.options.logger?.warn("contributor.market_response.recovery_rejected", {
+      linkId: packet.linkId,
+      transport,
+      payloadBytes: packet.payload.length,
+      reason,
+    });
   }
 
 
@@ -539,6 +573,8 @@ function isEnhancements(value: unknown): boolean {
       || !Number.isSafeInteger(value.spentPotential) || Number(value.spentPotential) < 0
       || !Array.isArray(value.cards) || value.cards.length > 16
       || !value.cards.every((card) => typeof card === "string" && card.length > 0 && card.length <= 256)
+      || (value.artifactSlot !== undefined
+        && (!Number.isSafeInteger(value.artifactSlot) || Number(value.artifactSlot) < 0 || Number(value.artifactSlot) > 3))
       || !Array.isArray(value.gems) || value.gems.length > 16) return false;
   return value.gems.every((gem) => isRecord(gem)
     && typeof gem.itemId === "string" && gem.itemId.length > 0 && gem.itemId.length <= 256

@@ -173,6 +173,16 @@ header{
 .quart i{font-style:normal;color:var(--faint);font-size:10px;letter-spacing:.05em;text-transform:uppercase}
 .quart b{color:var(--ink-strong);font-weight:600;font-size:13.5px}
 .quart .mid b{color:var(--acc)}
+.stat-signals{padding:9px 16px 10px;border-bottom:1px solid var(--line)}
+.stat-signals-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.stat-signals-head h2{margin:0;color:var(--ink-strong);font:700 9px var(--font-mono);letter-spacing:.06em;text-transform:uppercase}
+.stat-signals-head span{color:var(--faint);font:9px var(--font-mono);text-transform:uppercase}
+.stat-signals-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px 8px;margin-top:7px}
+.stat-signal{display:flex;align-items:center;justify-content:space-between;gap:6px;min-width:0;padding:5px 7px;border:1px solid var(--line);border-radius:6px;background:var(--panel2)}
+.stat-signal span{overflow:hidden;color:var(--dim);font-size:10.5px;text-overflow:ellipsis;white-space:nowrap}
+.stat-signal b{color:var(--acc);font:650 10.5px var(--font-mono);white-space:nowrap}
+.stat-signal b.down{color:#ed887e}
+.stat-signals-note{margin-top:6px;color:var(--faint);font-size:9.5px}
 .price-history{border-bottom:1px solid var(--line)}
 .history-head{display:flex;align-items:start;justify-content:space-between;gap:12px;padding:12px 16px 4px}
 .history-head h2{margin:0;color:var(--ink-strong);font-size:12px}
@@ -478,6 +488,9 @@ const STAT_LABEL = {
 
 function statLabel(name) {
   return STAT_LABEL[name] || String(name).replace(/([a-z])([A-Z])/g, "$1 $2");
+}
+function fingerprintKey(itemType, itemId, artifactSlot) {
+  return JSON.stringify([itemType, itemId, artifactSlot]);
 }
 
 function statSearchText(name) {
@@ -794,6 +807,8 @@ const state = {
   family: false,
   shown: PAGE,
   priceHistory: new Map(),
+  statFingerprints: new Map(),
+  statFingerprintGeneratedAt: null,
 };
 const $ = (id) => document.getElementById(id);
 const DESKTOP_API = "http://127.0.0.1:47831";
@@ -849,6 +864,9 @@ function renderCollector() {
     ? `${desktopState.packetsObserved.toLocaleString()} game packets · ${(desktopState.marketEventsDecoded ?? 0).toLocaleString()} market events · ${(desktopState.searchRequestsDecoded ?? 0).toLocaleString()} search requests · ${(desktopState.listingEventsDecoded ?? 0).toLocaleString()} listing responses`
       + ((desktopState.automaticCaptureRestarts ?? 0) > 0 ? ` · ${desktopState.automaticCaptureRestarts.toLocaleString()} automatic route restarts` : "")
       + ((desktopState.lateSessionResponsesRecovered ?? 0) > 0 ? ` · ${desktopState.lateSessionResponsesRecovered.toLocaleString()} late-session responses recovered` : "")
+      + ((desktopState.lateSessionRecoveryCandidates ?? 0) > 0 ? ` · ${desktopState.lateSessionRecoveryCandidates.toLocaleString()} late-session links checked` : "")
+      + ((desktopState.lateSessionRecoveryPayloadCandidates ?? 0) > 0 ? ` · ${desktopState.lateSessionRecoveryPayloadCandidates.toLocaleString()} string payload candidates` : "")
+      + ((desktopState.lateSessionRecoveryDecodeRejected ?? 0) > 0 ? ` · ${desktopState.lateSessionRecoveryDecodeRejected.toLocaleString()} response payloads rejected` : "")
     : "";
   const droppedFlows = desktopState?.droppedFlows ?? [];
   const unattributedPackets = droppedFlows.reduce((total, flow) => total + flow.packets, 0);
@@ -1490,6 +1508,41 @@ function renderList() {
   }).join("");
 }
 
+function statFingerprintSection(item, rows) {
+  if (item.fungible || rows.length === 0) return "";
+  let artifactSlot = null;
+  if (item.itemType === 4) {
+    if (rows.some((row) => !Number.isSafeInteger(row.artifactSlot))) return "";
+    const slots = [...new Set(rows.map((row) => row.artifactSlot))];
+    if (slots.length !== 1) return "";
+    [artifactSlot] = slots;
+  }
+  const fingerprint = state.statFingerprints.get(fingerprintKey(item.itemType, item.id, artifactSlot));
+  if (!fingerprint || !Array.isArray(fingerprint.stats)) return "";
+  const signals = fingerprint.stats
+    .filter((stat) => (stat.confidence === "high" || stat.confidence === "medium")
+      && typeof stat.stat === "string" && Number.isFinite(stat.premiumPct))
+    .sort((left, right) => Math.abs(right.premiumPct) - Math.abs(left.premiumPct))
+    .slice(0, 4);
+  if (signals.length === 0) return "";
+  const scope = artifactSlot == null ? "All rolls" : `${ART_SLOTS[artifactSlot]} rolls`;
+  const signalRows = signals.map((stat) => {
+    const label = statLabel(stat.stat);
+    const lift = `${stat.premiumPct >= 0 ? "+" : ""}${Math.round(stat.premiumPct)}%`;
+    const prevalence = Number.isFinite(stat.prevalencePct) ? Math.round(stat.prevalencePct) : null;
+    const title = `${label}: ${lift} matched asking-price lift`
+      + `${prevalence == null ? "" : `; present on ${prevalence}% of listings`}; ${stat.confidence} confidence`;
+    return `<div class="stat-signal" title="${escapeHtml(title)}"><span>${escapeHtml(label)}</span>`
+      + `<b class="${stat.premiumPct < 0 ? "down" : ""}">${lift}</b></div>`;
+  }).join("");
+  const freshness = state.statFingerprintGeneratedAt ? ` · observed ${ago(state.statFingerprintGeneratedAt)} ago` : "";
+  return `<section class="stat-signals" aria-label="Observed stat price signals">
+    <div class="stat-signals-head"><h2>Stat price signals · ${escapeHtml(scope)}</h2><span>observed</span></div>
+    <div class="stat-signals-grid">${signalRows}</div>
+    <div class="stat-signals-note">Matched asking-price lift · not sales or combat value${freshness}</div>
+  </section>`;
+}
+
 function renderInspector() {
   const pane = $("inspect");
   const item = state.open ? state.byId.get(state.open) : null;
@@ -1557,6 +1610,7 @@ function renderInspector() {
       <span class="age">oldest listing ${ageHTML(view?.firstSeenAt)} · newest listing ${ageHTML(view?.lastSeenAt)}</span>
     </div>
     ${quartileStrip(view?.quartiles)}
+    ${statFingerprintSection(item, rows)}
     ${item.fungible && view ? priceHistorySection(item, view) : ""}
     ${item.fungible ? depthDetails(view?.depth) : ""}
     ${item.fungible ? "" : `<div class="modes">
@@ -1755,6 +1809,22 @@ async function fetchAllListings() {
     listing.expiresAt === null || (typeof listing.expiresAt === "string" && Date.parse(listing.expiresAt) > now));
   return { listings, generatedAt: body.generatedAt };
 }
+async function fetchStatFingerprints() {
+  try {
+    const response = await fetch(`${API}/v2/markets/global/stat-fingerprints`);
+    if (!response.ok) return null;
+    const body = await response.json();
+    const generatedAt = Date.parse(body?.generatedAt);
+    if (body?.marketId !== "global" || body.modelVersion !== 1 || !Array.isArray(body.items)
+        || !Number.isFinite(generatedAt) || Date.now() - generatedAt > 24 * 60 * 60 * 1_000) {
+      return null;
+    }
+    return body;
+  } catch {
+    return null;
+  }
+}
+
 
 function publicVariant(row) {
   const stats = Array.isArray(row.stats) ? row.stats.map((stat) => ({
@@ -1779,7 +1849,7 @@ function publicVariant(row) {
     stats,
     enhancements: row.enhancements && typeof row.enhancements === "object" ? row.enhancements : null,
     chaos: false,
-    artifactSlot: null,
+    artifactSlot: Number.isSafeInteger(row.enhancements?.artifactSlot) ? row.enhancements.artifactSlot : null,
     depth: null,
     firstSeenAt: row.firstSeenAt,
     lastSeenAt: row.lastSeenAt,
@@ -1801,14 +1871,27 @@ async function load() {
   Object.assign(state, readUrl());
   $("q").value = state.query;
   try {
-    const [catalog, snapshot] = await Promise.all([
+    const [catalog, snapshot, statFingerprints] = await Promise.all([
       fetch("catalog.json?v=v2").then((response) => {
         if (!response.ok) throw new Error(`catalog ${response.status}`);
         return response.json();
       }),
       fetchAllListings(),
+      fetchStatFingerprints(),
     ]);
     state.catalog = catalog;
+    state.statFingerprints = new Map();
+    state.statFingerprintGeneratedAt = statFingerprints?.generatedAt || null;
+    for (const fingerprint of statFingerprints?.items || []) {
+      if (Number.isSafeInteger(fingerprint.itemType) && typeof fingerprint.itemId === "string"
+          && (fingerprint.artifactSlot === null
+            || (Number.isSafeInteger(fingerprint.artifactSlot) && fingerprint.artifactSlot >= 0 && fingerprint.artifactSlot <= 3))) {
+        state.statFingerprints.set(
+          fingerprintKey(fingerprint.itemType, fingerprint.itemId, fingerprint.artifactSlot),
+          fingerprint,
+        );
+      }
+    }
     const { listings, generatedAt } = snapshot;
     const groups = new Map();
     for (const listing of listings) {

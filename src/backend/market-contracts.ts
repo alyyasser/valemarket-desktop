@@ -20,6 +20,7 @@ export interface MarketUploadEnhancements {
   spentPotential: number;
   cards: string[];
   gems: MarketUploadGem[];
+  artifactSlot?: number;
 }
 
 export interface MarketUploadObservation {

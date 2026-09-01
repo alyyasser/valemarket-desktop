@@ -93,6 +93,10 @@ export interface DesktopState {
   automaticCaptureRestarts: number;
   marketEventsDecoded: number;
   lateSessionResponsesRecovered: number;
+  lateSessionRecoveryCandidates: number;
+  lateSessionRecoveryFramingRejected: number;
+  lateSessionRecoveryPayloadCandidates: number;
+  lateSessionRecoveryDecodeRejected: number;
   searchRequestsDecoded: number;
   listingEventsDecoded: number;
   listingsDecoded: number;

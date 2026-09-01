@@ -1,6 +1,6 @@
 {
   "name": "valemarket-npcap",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "Cross-platform desktop market browser and passive community contributor for Spirit Vale",
   "author": "ValeMarket",
@@ -23,6 +23,9 @@
     "package:windows": "bun run prepare && electron-builder --win zip --x64 --publish never",
     "package:linux": "bun run prepare && electron-builder --linux --x64 --publish never",
     "test": "bun test",
+    "spiritvale-analytics": "bun run spiritvale-analytics/server.ts",
+    "spiritvale-analytics:build": "bun run spiritvale-analytics/server.ts --build --refresh",
+    "spiritvale-analytics:deploy": "bun run spiritvale-analytics:build && wrangler deploy --config spiritvale-analytics/wrangler.jsonc",
     "typecheck": "tsc --noEmit",
     "check": "bun run typecheck && bun test"
   },
