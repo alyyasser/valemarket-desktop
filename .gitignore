@@ -8,3 +8,4 @@ data/
 .tmp/
 *.map
 .electron/
+LINUX_FIELD_TEST_REPORT.md
